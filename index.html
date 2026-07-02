@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recykal.market — App Mockup</title>
+<style>
+  :root {
+    --bg: #000000;
+    --surface: #101216;
+    --surface-2: #16181d;
+    --surface-3: #1d2026;
+    --stroke: #24272e;
+    --text: #ffffff;
+    --text-2: #9aa1ad;
+    --text-3: #6b7280;
+    --blue: #3d6bff;
+    --blue-soft: #7ea0ff;
+    --green: #8ce03c;
+    --green-dark: #35c759;
+    --teal: #2fb8a8;
+    --purple: #8b5cf6;
+    --orange: #f97316;
+    --red: #ff5a5a;
+    --radius-lg: 24px;
+    --radius-md: 18px;
+    --radius-sm: 12px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: #17181c;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    color: var(--text);
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 64px;
+    gap: 24px;
+    min-height: 100vh;
+  }
+  .page-title { text-align: center; }
+  .page-title h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; }
+  .page-title p { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+
+  /* ============ Phone frame ============ */
+  .phone {
+    width: 393px;
+    max-width: 100%;
+    height: 852px;
+    background: var(--bg);
+    border-radius: 48px;
+    border: 8px solid #26272b;
+    box-shadow: 0 30px 80px rgba(0,0,0,.6);
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  /* status bar */
+  .statusbar {
+    height: 54px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 28px 0;
+    font-size: 16px;
+    font-weight: 600;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 30;
+  }
+  .statusbar .icons { display: flex; align-items: center; gap: 6px; }
+  .statusbar svg { display: block; }
+
+  /* home indicator */
+  .home-indicator {
+    position: absolute;
+    bottom: 8px; left: 50%;
+    transform: translateX(-50%);
+    width: 140px; height: 5px;
+    border-radius: 3px;
+    background: #fff;
+    z-index: 40;
+    pointer-events: none;
+  }
+
+  /* ============ Screens ============ */
+  .screens { flex: 1; position: relative; overflow: hidden; }
+  .screen {
+    position: absolute;
+    inset: 0;
+    display: none;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 0 16px 130px;
+    scrollbar-width: none;
+  }
+  .screen::-webkit-scrollbar { display: none; }
+  .screen > * { flex-shrink: 0; }
+  .screen.active { display: flex; animation: fadeIn .22s ease; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ============ App header ============ */
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0 18px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 24px; font-weight: 700; letter-spacing: -0.4px; }
+  .brand .accent { color: var(--blue); }
+  .avatar-wrap { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .avatar {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1.5px solid #3a3d45;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700;
+    background: #0c0d10;
+  }
+
+  /* sub-screen header */
+  .sub-header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 0 18px;
+  }
+  .back-btn {
+    width: 40px; height: 40px;
+    border-radius: 50%;
+    border: 1px solid var(--stroke);
+    background: var(--surface);
+    color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .sub-header h2 { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; }
+  .sub-header .sub { font-size: 12.5px; color: var(--text-2); margin-top: 2px; }
+
+  /* ============ Hero ============ */
+  .hero {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    position: relative;
+    background:
+      radial-gradient(120% 90% at 85% 20%, #1b2d52 0%, rgba(10,14,24,0) 55%),
+      radial-gradient(80% 70% at 90% 45%, rgba(61,107,255,.28) 0%, rgba(0,0,0,0) 60%),
+      linear-gradient(140deg, #0b0d12 0%, #0a0c14 50%, #05060a 100%);
+    border: 1px solid #1c1f27;
+    padding: 30px 24px 18px;
+  }
+  .hero .eyebrow { font-size: 24px; font-weight: 400; color: #c8cfdb; letter-spacing: -0.3px; }
+  .hero .big {
+    font-size: 62px; font-weight: 800; letter-spacing: 1px; line-height: 1.05;
+    background: linear-gradient(180deg, #ffffff 20%, #6f86c9 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    margin-top: 2px;
+  }
+  .hero-gem {
+    position: absolute; top: 14px; right: 6px;
+    width: 190px; height: 190px;
+    pointer-events: none;
+  }
+  .ticker {
+    margin-top: 28px;
+    background: rgba(16,18,24,.72);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,.06);
+    border-radius: var(--radius-md);
+    display: flex;
+    padding: 18px 6px;
+    position: relative;
+    z-index: 2;
+  }
+  .ticker .cell {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    position: relative;
+  }
+  .ticker .cell + .cell::before {
+    content: "";
+    position: absolute; left: 0; top: 8%;
+    height: 84%; width: 1px;
+    background: rgba(255,255,255,.10);
+  }
+  .ticker .name { font-size: 16.5px; font-weight: 700; }
+  .ticker .price { font-size: 14px; color: #cfd4dd; margin-top: 2px; }
+  .ticker .delta { font-size: 12.5px; color: var(--green); margin-top: 3px; display: flex; align-items: center; gap: 4px; font-weight: 600; }
+  .dots { display: flex; gap: 8px; justify-content: center; padding: 16px 0 4px; position: relative; z-index: 2; }
+  .dots span { width: 8px; height: 8px; border-radius: 4px; background: #3a3d45; }
+  .dots span.on { width: 26px; background: #e7e9ee; }
+
+  /* ============ Section head ============ */
+  .section-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 26px 2px 14px;
+  }
+  .section-head h3 { font-size: 19px; font-weight: 700; letter-spacing: -0.2px; }
+  .section-head h3 small { font-weight: 400; font-size: 15px; color: #c9ced8; }
+  .section-head .link { font-size: 14px; color: var(--text-2); display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+  /* ============ Value prop cards ============ */
+  .vp-row {
+    display: flex; gap: 10px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin: 0 -16px; padding: 2px 16px 4px;
+  }
+  .vp-row::-webkit-scrollbar { display: none; }
+  .vp-card {
+    min-width: 132px;
+    background: linear-gradient(180deg, #14161b 0%, #0e1013 100%);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 22px 12px 18px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s;
+  }
+  .vp-card:hover { border-color: #34394a; }
+  .vp-card .ic { height: 58px; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; }
+  .vp-card h4 { font-size: 16.5px; font-weight: 700; }
+  .vp-card p { font-size: 12.5px; color: var(--text-2); margin-top: 8px; line-height: 1.45; }
+
+  /* ============ Banner cards ============ */
+  .banner {
+    background: linear-gradient(180deg, #14161b 0%, #0f1115 100%);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    display: flex;
+    gap: 18px;
+    margin-top: 16px;
+    cursor: pointer;
+  }
+  .banner .b-icon {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .b-icon.blue { background: radial-gradient(circle at 35% 30%, #223a75, #101a33); border: 1px solid #2c3f74; }
+  .b-icon.green { background: radial-gradient(circle at 35% 30%, #263516, #141c0c); border: 1px solid #33471c; }
+  .banner .b-body { flex: 1; }
+  .banner h4 { font-size: 21px; font-weight: 700; letter-spacing: -0.2px; }
+  .banner .b-sub { font-size: 14.5px; color: var(--text-2); margin-top: 6px; }
+  .banner .b-note { font-size: 13px; color: var(--text-3); margin-top: 5px; }
+  .banner .chev { align-self: center; color: var(--green); }
+  .btn-light {
+    margin-top: 16px;
+    width: 100%;
+    background: #eef0f4;
+    color: #0b0c0f;
+    font-size: 16.5px; font-weight: 700;
+    border: none;
+    border-radius: 16px;
+    padding: 15px 18px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    cursor: pointer;
+  }
+  .btn-primary {
+    width: 100%;
+    background: var(--blue);
+    color: #fff;
+    font-size: 16.5px; font-weight: 700;
+    border: none;
+    border-radius: 16px;
+    padding: 15px 18px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    cursor: pointer;
+  }
+  .btn-ghost {
+    width: 100%;
+    background: transparent;
+    color: #d7dbe3;
+    font-size: 15.5px; font-weight: 600;
+    border: 1px solid var(--stroke);
+    border-radius: 16px;
+    padding: 14px 18px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    cursor: pointer;
+  }
+
+  /* ============ Bottom nav ============ */
+  .bottom-nav {
+    position: absolute;
+    left: 10px; right: 10px; bottom: 10px;
+    background: linear-gradient(180deg, #131519 0%, #0d0e11 100%);
+    border: 1px solid #1f2229;
+    border-radius: 30px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-around;
+    padding: 14px 6px 20px;
+    z-index: 20;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    font-size: 13px; color: var(--text-3);
+    background: none; border: none; cursor: pointer;
+    width: 64px;
+    position: relative;
+    font-family: inherit;
+  }
+  .nav-item.active { color: #fff; }
+  .nav-item.active::after {
+    content: ""; width: 4px; height: 4px; border-radius: 2px; background: #fff;
+    position: absolute; bottom: -12px;
+  }
+  .nav-item .fab {
+    width: 62px; height: 62px;
+    margin-top: -38px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 25%, #23252c, #0c0d10);
+    border: 1px solid #34384a;
+    box-shadow: 0 0 0 6px rgba(61,107,255,.10), 0 10px 24px rgba(0,0,0,.5);
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* ============ News screen ============ */
+  .chip-row { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 4px 16px 16px; }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip {
+    padding: 9px 16px;
+    border-radius: 20px;
+    background: var(--surface);
+    border: 1px solid var(--stroke);
+    color: var(--text-2);
+    font-size: 13.5px; font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .chip.on { background: #e9ecf2; color: #0b0c0f; border-color: #e9ecf2; }
+  .news-card {
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 18px;
+    margin-bottom: 12px;
+    cursor: pointer;
+  }
+  .news-card .meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); margin-bottom: 10px; }
+  .tag { padding: 3px 10px; border-radius: 12px; font-size: 11.5px; font-weight: 700; }
+  .tag.blue { background: rgba(61,107,255,.16); color: #7ea0ff; }
+  .tag.green { background: rgba(140,224,60,.13); color: var(--green); }
+  .tag.orange { background: rgba(249,115,22,.14); color: #fba263; }
+  .tag.purple { background: rgba(139,92,246,.15); color: #b39bfa; }
+  .news-card h4 { font-size: 16.5px; font-weight: 700; line-height: 1.4; }
+  .news-card p { font-size: 13.5px; color: var(--text-2); margin-top: 8px; line-height: 1.55; }
+  .news-hero {
+    border-radius: var(--radius-lg);
+    border: 1px solid #1e2128;
+    overflow: hidden;
+    margin-bottom: 16px;
+    cursor: pointer;
+    background:
+      radial-gradient(100% 100% at 90% 0%, rgba(47,184,168,.35), transparent 60%),
+      linear-gradient(150deg, #101820, #0a0d12);
+    padding: 24px 20px;
+  }
+  .news-hero .tag { margin-bottom: 12px; display: inline-block; }
+  .news-hero h3 { font-size: 21px; font-weight: 800; line-height: 1.3; letter-spacing: -0.3px; }
+  .news-hero p { font-size: 14px; color: var(--text-2); margin-top: 10px; line-height: 1.55; }
+
+  /* ============ Prices / market table ============ */
+  .price-row {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .price-row .p-ic {
+    width: 48px; height: 48px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .p-ic.blue { background: rgba(61,107,255,.12); }
+  .p-ic.green { background: rgba(140,224,60,.10); }
+  .p-ic.purple { background: rgba(139,92,246,.12); }
+  .p-ic.teal { background: rgba(47,184,168,.12); }
+  .p-ic.orange { background: rgba(249,115,22,.12); }
+  .price-row .p-body { flex: 1; }
+  .price-row h4 { font-size: 16px; font-weight: 700; }
+  .price-row .p-sub { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .price-row .p-val { text-align: right; }
+  .price-row .p-price { font-size: 16.5px; font-weight: 700; }
+  .price-row .p-delta { font-size: 12.5px; font-weight: 600; margin-top: 3px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+  .up { color: var(--green); }
+  .down { color: var(--red); }
+  .spark { margin: 0 4px; flex-shrink: 0; }
+
+  /* ============ Sell / List screen ============ */
+  .field-label { font-size: 14px; font-weight: 600; color: #cfd4dd; margin: 20px 2px 10px; display: block; }
+  .material-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .mat-card {
+    background: var(--surface);
+    border: 1.5px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 16px 8px 14px;
+    text-align: center;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .mat-card .m-ic { height: 40px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
+  .mat-card h5 { font-size: 14px; font-weight: 700; }
+  .mat-card p { font-size: 11.5px; color: var(--text-3); margin-top: 4px; }
+  .mat-card.sel { border-color: var(--blue); background: rgba(61,107,255,.08); }
+  .input-box {
+    display: flex; align-items: center;
+    background: var(--surface);
+    border: 1.5px solid #1e2128;
+    border-radius: 16px;
+    padding: 4px 18px;
+  }
+  .input-box input {
+    flex: 1;
+    background: none; border: none; outline: none;
+    color: #fff; font-size: 17px; font-weight: 600;
+    padding: 13px 0;
+    font-family: inherit;
+    min-width: 0;
+  }
+  .input-box input::placeholder { color: #4b5160; font-weight: 500; }
+  .input-box .unit { font-size: 14px; color: var(--text-3); font-weight: 600; }
+  .hint { font-size: 12.5px; color: var(--text-3); margin: 8px 4px 0; display: flex; align-items: center; gap: 6px; }
+  .hint b { color: var(--green); font-weight: 600; }
+  .seg {
+    display: flex; background: var(--surface); border: 1px solid var(--stroke);
+    border-radius: 16px; padding: 5px; gap: 5px;
+  }
+  .seg button {
+    flex: 1; padding: 11px 8px; border: none; border-radius: 12px;
+    background: transparent; color: var(--text-2);
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .seg button.on { background: #e9ecf2; color: #0b0c0f; }
+  .summary-box {
+    margin-top: 22px;
+    background: linear-gradient(160deg, rgba(61,107,255,.10), rgba(61,107,255,.03));
+    border: 1px solid rgba(61,107,255,.28);
+    border-radius: var(--radius-md);
+    padding: 18px;
+  }
+  .summary-box .row { display: flex; justify-content: space-between; font-size: 14px; color: var(--text-2); padding: 5px 0; }
+  .summary-box .row b { color: #fff; font-weight: 700; }
+  .summary-box .row.total { border-top: 1px dashed #33405f; margin-top: 8px; padding-top: 12px; font-size: 15px; }
+  .summary-box .row.total b { font-size: 18px; color: var(--blue-soft); }
+
+  /* listing cards on sell screen */
+  .listing-card {
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 10px;
+    display: flex; gap: 14px; align-items: center;
+  }
+  .listing-card .p-ic { width: 46px; height: 46px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .listing-card h5 { font-size: 15px; font-weight: 700; }
+  .listing-card p { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .status { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 12px; }
+  .status.live { background: rgba(140,224,60,.13); color: var(--green); }
+  .status.review { background: rgba(249,115,22,.14); color: #fba263; }
+  .status.sold { background: rgba(255,255,255,.08); color: var(--text-2); }
+
+  /* ============ Payments ============ */
+  .wallet {
+    border-radius: var(--radius-lg);
+    background:
+      radial-gradient(120% 120% at 85% 0%, rgba(61,107,255,.45), transparent 55%),
+      linear-gradient(150deg, #131722, #0a0c12);
+    border: 1px solid #232c44;
+    padding: 26px 22px 22px;
+    position: relative;
+    overflow: hidden;
+  }
+  .wallet .w-label { font-size: 13.5px; color: #aab4cd; font-weight: 600; letter-spacing: .3px; }
+  .wallet .w-amount { font-size: 40px; font-weight: 800; letter-spacing: -1px; margin-top: 8px; }
+  .wallet .w-amount small { font-size: 20px; color: #8e9ab8; font-weight: 600; }
+  .wallet .w-meta { display: flex; gap: 18px; margin-top: 14px; font-size: 12.5px; color: #8e9ab8; }
+  .wallet .w-meta b { color: #fff; font-weight: 700; display: block; font-size: 14.5px; margin-top: 2px; }
+  .wallet-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .wallet-actions button {
+    flex: 1; padding: 12px 8px; border-radius: 14px;
+    font-size: 14px; font-weight: 700; cursor: pointer;
+    font-family: inherit;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+  }
+  .wa-primary { background: #eef0f4; color: #0b0c0f; border: none; }
+  .wa-ghost { background: rgba(255,255,255,.06); color: #fff; border: 1px solid rgba(255,255,255,.12); }
+  .txn {
+    display: flex; align-items: center; gap: 14px;
+    padding: 15px 4px;
+    border-bottom: 1px solid #17191e;
+  }
+  .txn:last-child { border-bottom: none; }
+  .txn .t-ic {
+    width: 44px; height: 44px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .t-ic.in { background: rgba(140,224,60,.10); }
+  .t-ic.out { background: rgba(255,90,90,.10); }
+  .t-ic.pend { background: rgba(249,115,22,.12); }
+  .txn .t-body { flex: 1; }
+  .txn h5 { font-size: 15px; font-weight: 700; }
+  .txn p { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .txn .t-amt { text-align: right; font-size: 15.5px; font-weight: 700; }
+  .txn .t-amt span { display: block; font-size: 11.5px; font-weight: 600; color: var(--text-3); margin-top: 3px; }
+  .t-amt.credit { color: var(--green); }
+
+  /* ============ More screen ============ */
+  .profile-card {
+    display: flex; align-items: center; gap: 16px;
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-lg);
+    padding: 20px;
+  }
+  .profile-card .avatar { width: 60px; height: 60px; font-size: 20px; background: radial-gradient(circle at 30% 30%, #24304f, #10141f); border-color: #33415f; }
+  .profile-card h4 { font-size: 18px; font-weight: 700; }
+  .profile-card p { font-size: 13px; color: var(--text-2); margin-top: 4px; }
+  .kyc-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 8px;
+    font-size: 11.5px; font-weight: 700;
+    color: #fba263; background: rgba(249,115,22,.13);
+    padding: 4px 10px; border-radius: 12px;
+  }
+  .menu-group {
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    margin-top: 16px;
+    overflow: hidden;
+  }
+  .menu-group .g-title { font-size: 12px; font-weight: 700; letter-spacing: .8px; color: var(--text-3); padding: 16px 18px 6px; text-transform: uppercase; }
+  .menu-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 15px 18px;
+    cursor: pointer;
+    border: none; background: none; width: 100%; text-align: left;
+    color: var(--text); font-family: inherit;
+  }
+  .menu-item + .menu-item { border-top: 1px solid #16181d; }
+  .menu-item .m-ic {
+    width: 40px; height: 40px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .menu-item h5 { font-size: 15px; font-weight: 600; }
+  .menu-item p { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+  .menu-item .grow { flex: 1; }
+
+  /* ============ KYC screen ============ */
+  .kyc-hero {
+    text-align: center;
+    padding: 34px 20px 10px;
+  }
+  .kyc-shield {
+    width: 108px; height: 108px; margin: 0 auto 24px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #223a75, #0d1526);
+    border: 1px solid #2c3f74;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 60px rgba(61,107,255,.25);
+  }
+  .kyc-hero h3 { font-size: 25px; font-weight: 800; letter-spacing: -0.4px; }
+  .kyc-hero p { font-size: 14.5px; color: var(--text-2); margin-top: 10px; line-height: 1.6; }
+  .kyc-steps { margin-top: 28px; }
+  .kyc-step {
+    display: flex; gap: 16px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    margin-bottom: 10px;
+    align-items: center;
+  }
+  .kyc-step .num {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: rgba(61,107,255,.12);
+    color: var(--blue-soft);
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: 15px;
+    flex-shrink: 0;
+  }
+  .kyc-step .num.done { background: rgba(140,224,60,.13); color: var(--green); }
+  .kyc-step h5 { font-size: 15px; font-weight: 700; }
+  .kyc-step p { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+  .secure-note {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    font-size: 12.5px; color: var(--text-3);
+    margin-top: 16px;
+  }
+
+  /* ============ Success overlay screen ============ */
+  .success-wrap { text-align: center; padding: 70px 24px 0; }
+  .success-ring {
+    width: 120px; height: 120px; margin: 0 auto 28px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #263516, #101608);
+    border: 1px solid #3c5420;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 70px rgba(140,224,60,.22);
+  }
+  .success-wrap h3 { font-size: 26px; font-weight: 800; letter-spacing: -0.4px; }
+  .success-wrap > p { font-size: 15px; color: var(--text-2); margin-top: 12px; line-height: 1.6; }
+  .success-detail {
+    margin-top: 30px;
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 6px 18px;
+    text-align: left;
+  }
+  .success-detail .row { display: flex; justify-content: space-between; padding: 13px 0; font-size: 14px; color: var(--text-2); border-bottom: 1px solid #16181d; }
+  .success-detail .row:last-child { border-bottom: none; }
+  .success-detail .row b { color: #fff; font-weight: 700; }
+
+  /* GST locker */
+  .doc-row {
+    display: flex; align-items: center; gap: 14px;
+    background: var(--surface);
+    border: 1px solid #1e2128;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 10px;
+    cursor: pointer;
+  }
+  .doc-row .d-ic { width: 46px; height: 46px; border-radius: 13px; background: rgba(249,115,22,.10); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .doc-row h5 { font-size: 14.5px; font-weight: 700; }
+  .doc-row p { font-size: 12px; color: var(--text-3); margin-top: 3px; }
+  .stat-tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 18px; }
+  .stat-tile { background: var(--surface); border: 1px solid #1e2128; border-radius: var(--radius-md); padding: 18px; }
+  .stat-tile .s-label { font-size: 12.5px; color: var(--text-3); font-weight: 600; }
+  .stat-tile .s-val { font-size: 24px; font-weight: 800; margin-top: 8px; letter-spacing: -0.5px; }
+  .stat-tile .s-note { font-size: 12px; margin-top: 6px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="page-title">
+  <h1>Recykal.market — HTML Mockup</h1>
+  <p>Tap the bottom navigation and cards inside the phone to explore all screens.</p>
+</div>
+
+<div class="phone">
+
+  <!-- Status bar -->
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="icons">
+      <svg width="20" height="14" viewBox="0 0 20 14" fill="#fff"><rect x="0" y="9" width="3.5" height="5" rx="1"/><rect x="5.2" y="6.5" width="3.5" height="7.5" rx="1"/><rect x="10.4" y="4" width="3.5" height="10" rx="1"/><rect x="15.6" y="1" width="3.5" height="13" rx="1"/></svg>
+      <svg width="18" height="14" viewBox="0 0 18 14" fill="#fff"><path d="M9 11.5a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6zM9 7c-1.9 0-3.7.75-5 2l1.6 1.7A4.9 4.9 0 0 1 9 9.3c1.3 0 2.5.5 3.4 1.4L14 9c-1.3-1.25-3.1-2-5-2zm0-4.5C6 2.5 3.2 3.7 1.2 5.7l1.6 1.7A8.4 8.4 0 0 1 9 5c2.4 0 4.6.9 6.2 2.4l1.6-1.7C14.8 3.7 12 2.5 9 2.5z" transform="translate(0 -2)"/></svg>
+      <svg width="27" height="14" viewBox="0 0 27 14"><rect x="0.5" y="0.5" width="22" height="12" rx="3.5" stroke="#fff" opacity=".4" fill="none"/><rect x="2.5" y="2.5" width="18" height="8" rx="2" fill="#fff"/><path d="M24.5 4.5v4a2.2 2.2 0 0 0 0-4z" fill="#fff" opacity=".5"/></svg>
+    </span>
+  </div>
+
+  <div class="screens">
+
+    <!-- ================= HOME ================= -->
+    <section class="screen active" id="screen-home">
+      <header class="app-header">
+        <div class="brand">
+          <svg width="26" height="22" viewBox="0 0 26 22" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 2 11l6 8"/><path d="M18 3l6 8-6 8"/></svg>
+          Recykal<span class="accent">.market</span>
+        </div>
+        <div class="avatar-wrap" onclick="go('screen-more')">
+          <div class="avatar">AD</div>
+          <svg width="14" height="9" viewBox="0 0 14 9" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M1 1.5 7 7.5 13 1.5"/></svg>
+        </div>
+      </header>
+
+      <div class="hero">
+        <svg class="hero-gem" viewBox="0 0 200 200" fill="none">
+          <defs>
+            <linearGradient id="gemA" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dfe9ff"/><stop offset=".5" stop-color="#6f9bff"/><stop offset="1" stop-color="#1a3a8f"/></linearGradient>
+            <linearGradient id="gemB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#3d6bff"/></linearGradient>
+          </defs>
+          <g opacity=".95">
+            <polygon points="100,30 145,55 160,95 100,175 40,95 55,55" fill="url(#gemA)" opacity=".9"/>
+            <polygon points="100,30 145,55 100,80" fill="#cfe0ff" opacity=".85"/>
+            <polygon points="100,30 55,55 100,80" fill="#8fb2ff" opacity=".8"/>
+            <polygon points="55,55 40,95 100,80" fill="#4f7dff" opacity=".8"/>
+            <polygon points="145,55 160,95 100,80" fill="#2a4fd0" opacity=".85"/>
+            <polygon points="40,95 100,175 100,80" fill="#3457c9" opacity=".75"/>
+            <polygon points="160,95 100,175 100,80" fill="#16307e" opacity=".8"/>
+            <polygon points="92,46 104,38 112,52 98,58" fill="#fff" opacity=".9"/>
+          </g>
+          <circle cx="152" cy="46" r="2.4" fill="#fff" opacity=".9"/>
+          <circle cx="38" cy="120" r="1.8" fill="#9db8ff" opacity=".7"/>
+          <circle cx="170" cy="130" r="1.6" fill="#9db8ff" opacity=".6"/>
+        </svg>
+        <div class="eyebrow">Exclusive for</div>
+        <div class="big">YOU</div>
+
+        <div class="ticker" onclick="go('screen-market')">
+          <div class="cell">
+            <svg width="26" height="34" viewBox="0 0 24 32" fill="none" stroke="#3d6bff" stroke-width="1.8" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M4 16h16M4 22h16"/></svg>
+            <div><div class="name">PET</div><div class="price">50/kg</div><div class="delta"><svg width="9" height="7" viewBox="0 0 9 7" fill="#8ce03c"><path d="M4.5 0 9 7H0z"/></svg>10%</div></div>
+          </div>
+          <div class="cell">
+            <svg width="28" height="34" viewBox="0 0 26 32" fill="none" stroke="#8ce03c" stroke-width="1.8" stroke-linejoin="round"><path d="M7 6h10l4 5v16a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V11l4-5z"/><path d="M10 6V3h6v3"/><rect x="8" y="15" width="8" height="9" rx="1.5"/></svg>
+            <div><div class="name">CRC</div><div class="price">40/kg</div><div class="delta"><svg width="9" height="7" viewBox="0 0 9 7" fill="#8ce03c"><path d="M4.5 0 9 7H0z"/></svg>10%</div></div>
+          </div>
+          <div class="cell">
+            <svg width="26" height="34" viewBox="0 0 24 32" fill="none" stroke="#8b5cf6" stroke-width="1.8" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M8 14h4v5H8zM13 21h4"/></svg>
+            <div><div class="name">HDPE</div><div class="price">45/kg</div><div class="delta"><svg width="9" height="7" viewBox="0 0 9 7" fill="#8ce03c"><path d="M4.5 0 9 7H0z"/></svg>8%</div></div>
+          </div>
+        </div>
+        <div class="dots"><span class="on"></span><span></span><span></span><span></span><span></span></div>
+      </div>
+
+      <div class="section-head">
+        <h3>For YOU <small>(All value propositions)</small></h3>
+        <span class="link">View all <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#9aa1ad" stroke-width="2" stroke-linecap="round"><path d="M1 1l5 5-5 5"/></svg></span>
+      </div>
+
+      <div class="vp-row">
+        <div class="vp-card" onclick="go('screen-market')">
+          <div class="ic"><svg width="52" height="42" viewBox="0 0 52 42" fill="none" stroke="#3d6bff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="28" height="22" rx="3"/><path d="M30 14h9l7 8v8h-16z"/><circle cx="12" cy="34" r="4.5"/><circle cx="38" cy="34" r="4.5"/></svg></div>
+          <h4>Logistics</h4>
+          <p>Nationwide pickup &amp; delivery</p>
+        </div>
+        <div class="vp-card" onclick="go('screen-payments')">
+          <div class="ic"><svg width="46" height="46" viewBox="0 0 46 46" fill="none" stroke="#8ce03c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="23" cy="23" r="19"/><path d="M16 14h13M16 20h13M17 14c4 0 7 2 7 6s-3 6-7 6l9 8"/></svg></div>
+          <h4>Credit</h4>
+          <p>Fast &amp; flexible credit options</p>
+        </div>
+        <div class="vp-card" onclick="go('screen-kyc')">
+          <div class="ic"><svg width="42" height="48" viewBox="0 0 42 48" fill="none" stroke="#8b5cf6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 38 8v13c0 11-7.5 19.5-17 23C11.5 40.5 4 32 4 21V8l17-6z"/><path d="M13 23l6 6 10-11"/></svg></div>
+          <h4>Insurance</h4>
+          <p>Secure your transactions</p>
+        </div>
+        <div class="vp-card" onclick="go('screen-market')">
+          <div class="ic"><svg width="50" height="44" viewBox="0 0 50 44" fill="none" stroke="#2fb8a8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16 25 4l21 12"/><path d="M8 18v18h34V18"/><rect x="19" y="22" width="12" height="14" rx="1"/><path d="M19 29h12"/></svg></div>
+          <h4>Supply</h4>
+          <p>Quality assured materials</p>
+        </div>
+        <div class="vp-card" onclick="go('screen-gst')">
+          <div class="ic"><svg width="42" height="48" viewBox="0 0 42 48" fill="none" stroke="#f97316" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10M11 22h12M11 29h8"/><rect x="24" y="28" width="12" height="11" rx="2" fill="#0e1013"/><path d="M27 28v-3a3 3 0 0 1 6 0v3"/></svg></div>
+          <h4>GST Locker</h4>
+          <p>Store &amp; manage GST invoices</p>
+        </div>
+      </div>
+
+      <div class="banner" onclick="go('screen-kyc')">
+        <div class="b-icon blue">
+          <svg width="30" height="34" viewBox="0 0 42 48" fill="none" stroke="#8fb2ff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 38 8v13c0 11-7.5 19.5-17 23C11.5 40.5 4 32 4 21V8l17-6z"/><path d="M13 23l6 6 10-11"/></svg>
+        </div>
+        <div class="b-body">
+          <h4>2 mins KYC</h4>
+          <div class="b-sub">Quick and secured via DigiLocker</div>
+          <button class="btn-light" onclick="event.stopPropagation(); go('screen-kyc')">Start KYC
+            <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="#0b0c0f" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h17M12 1l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="banner" onclick="go('screen-sell')">
+        <div class="b-icon green">
+          <svg width="26" height="32" viewBox="0 0 22 30" fill="#8ce03c"><path d="M13 0 1 17h7L8 30 21 12h-8z"/></svg>
+        </div>
+        <div class="b-body">
+          <h4>Sell now</h4>
+          <div class="b-sub">Sell anytime</div>
+          <div class="b-note">Lots available, Rajesh from UPSolid Logistics</div>
+        </div>
+        <div class="chev">
+          <svg width="9" height="16" viewBox="0 0 9 16" fill="none" stroke="#8ce03c" stroke-width="2.4" stroke-linecap="round"><path d="M1 1l7 7-7 7"/></svg>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= NEWS ================= -->
+    <section class="screen" id="screen-news">
+      <header class="app-header">
+        <div class="brand" style="font-size:22px;">Market <span class="accent">News</span></div>
+        <div class="avatar-wrap" onclick="go('screen-more')"><div class="avatar">AD</div></div>
+      </header>
+
+      <div class="chip-row">
+        <button class="chip on">All</button>
+        <button class="chip">Plastics</button>
+        <button class="chip">Metals</button>
+        <button class="chip">Paper</button>
+        <button class="chip">E-waste</button>
+        <button class="chip">Policy</button>
+      </div>
+
+      <div class="news-hero">
+        <span class="tag green">TRENDING</span>
+        <h3>PET flake prices rally 10% as beverage demand peaks this summer</h3>
+        <p>Strong offtake from fibre and bottle-to-bottle recyclers pushed clear PET flakes to ₹50/kg across western India hubs.</p>
+        <div class="meta" style="display:flex;gap:8px;font-size:12px;color:#6b7280;margin-top:14px;">Recykal Insights · 2 hrs ago · 4 min read</div>
+      </div>
+
+      <div class="news-card">
+        <div class="meta"><span class="tag blue">POLICY</span> Yesterday</div>
+        <h4>New EPR guidelines mandate 60% recycled content reporting for FY 2026-27</h4>
+        <p>CPCB's updated framework tightens traceability requirements for brand owners and PIBOs, boosting demand for certified recyclers.</p>
+      </div>
+
+      <div class="news-card">
+        <div class="meta"><span class="tag orange">METALS</span> Yesterday</div>
+        <h4>CRC scrap holds firm at ₹40/kg on steady mill procurement</h4>
+        <p>Cold-rolled coil scrap remains well bid as secondary steelmakers restock ahead of the monsoon construction slowdown.</p>
+      </div>
+
+      <div class="news-card">
+        <div class="meta"><span class="tag purple">E-WASTE</span> 2 days ago</div>
+        <h4>Lithium battery recycling capacity to triple by 2027, says industry body</h4>
+        <p>Investments worth ₹4,200 crore are lined up across 14 new facilities, targeting black-mass recovery from EV batteries.</p>
+      </div>
+
+      <div class="news-card">
+        <div class="meta"><span class="tag green">PLASTICS</span> 3 days ago</div>
+        <h4>HDPE regrind moves up 8% as FMCG packaging demand strengthens</h4>
+        <p>Blue drum and natural HDPE grades saw the sharpest gains, with buyers competing for consistent, contamination-free lots.</p>
+      </div>
+    </section>
+
+    <!-- ================= SELL / LIST ================= -->
+    <section class="screen" id="screen-sell">
+      <header class="app-header">
+        <div class="brand" style="font-size:22px;">Sell <span class="accent">Material</span></div>
+        <div class="avatar-wrap" onclick="go('screen-more')"><div class="avatar">AD</div></div>
+      </header>
+
+      <label class="field-label">Select material</label>
+      <div class="material-grid">
+        <div class="mat-card sel" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="22" height="30" viewBox="0 0 24 32" fill="none" stroke="#3d6bff" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M4 16h16M4 22h16"/></svg></div>
+          <h5>PET</h5><p>₹50/kg</p>
+        </div>
+        <div class="mat-card" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="24" height="30" viewBox="0 0 26 32" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linejoin="round"><path d="M7 6h10l4 5v16a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V11l4-5z"/><path d="M10 6V3h6v3"/><rect x="8" y="15" width="8" height="9" rx="1.5"/></svg></div>
+          <h5>CRC</h5><p>₹40/kg</p>
+        </div>
+        <div class="mat-card" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="22" height="30" viewBox="0 0 24 32" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M8 14h4v5H8zM13 21h4"/></svg></div>
+          <h5>HDPE</h5><p>₹45/kg</p>
+        </div>
+        <div class="mat-card" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke="#2fb8a8" stroke-width="2" stroke-linejoin="round"><path d="M3 8h22v14a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8z"/><path d="M3 8l4-5h14l4 5M14 3v5"/></svg></div>
+          <h5>Cartons</h5><p>₹14/kg</p>
+        </div>
+        <div class="mat-card" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke="#f97316" stroke-width="2" stroke-linejoin="round"><rect x="3" y="6" width="22" height="16" rx="2"/><path d="M8 22v3M20 22v3M8 11h12M8 15h7"/></svg></div>
+          <h5>E-waste</h5><p>₹120/kg</p>
+        </div>
+        <div class="mat-card" onclick="selectMat(this)">
+          <div class="m-ic"><svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke="#9aa1ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="14" r="11"/><path d="M14 7v7l5 3"/></svg></div>
+          <h5>Others</h5><p>Get quote</p>
+        </div>
+      </div>
+
+      <label class="field-label">Quantity</label>
+      <div class="input-box">
+        <input type="text" value="2,500" inputmode="numeric">
+        <span class="unit">kg</span>
+      </div>
+      <div class="hint">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="#8ce03c" stroke-width="1.8"><circle cx="7" cy="7" r="6"/><path d="M7 6.5V10M7 4v.5" stroke-linecap="round"/></svg>
+        Minimum lot size 500 kg · <b>Free pickup above 2,000 kg</b>
+      </div>
+
+      <label class="field-label">Expected price</label>
+      <div class="input-box">
+        <span class="unit" style="margin-right:10px;">₹</span>
+        <input type="text" value="50" inputmode="numeric">
+        <span class="unit">per kg</span>
+      </div>
+      <div class="hint">
+        <svg width="9" height="7" viewBox="0 0 9 7" fill="#8ce03c"><path d="M4.5 0 9 7H0z"/></svg>
+        Market benchmark today: <b>₹50/kg (+10%)</b>
+      </div>
+
+      <label class="field-label">Pickup window</label>
+      <div class="seg">
+        <button class="on">Tomorrow</button>
+        <button>2–3 days</button>
+        <button>This week</button>
+      </div>
+
+      <div class="summary-box">
+        <div class="row"><span>Material</span><b>PET · Clear flakes</b></div>
+        <div class="row"><span>Quantity</span><b>2,500 kg</b></div>
+        <div class="row"><span>Logistics</span><b>Free pickup</b></div>
+        <div class="row total"><span>Estimated payout</span><b>₹1,25,000</b></div>
+      </div>
+
+      <button class="btn-primary" style="margin-top:18px;" onclick="go('screen-success')">Post listing
+        <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h17M12 1l6 6-6 6"/></svg>
+      </button>
+
+      <div class="section-head" style="padding-top:30px;">
+        <h3>Your listings</h3>
+        <span class="link">View all</span>
+      </div>
+      <div class="listing-card">
+        <div class="p-ic blue"><svg width="20" height="26" viewBox="0 0 24 32" fill="none" stroke="#3d6bff" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/></svg></div>
+        <div style="flex:1"><h5>PET · 1,800 kg</h5><p>Posted 2 days ago · 6 buyer offers</p></div>
+        <span class="status live">LIVE</span>
+      </div>
+      <div class="listing-card">
+        <div class="p-ic green"><svg width="22" height="26" viewBox="0 0 26 32" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linejoin="round"><path d="M7 6h10l4 5v16a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V11l4-5z"/></svg></div>
+        <div style="flex:1"><h5>CRC · 3,200 kg</h5><p>Posted 5 days ago · Quality check</p></div>
+        <span class="status review">IN REVIEW</span>
+      </div>
+      <div class="listing-card">
+        <div class="p-ic purple"><svg width="20" height="26" viewBox="0 0 24 32" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/></svg></div>
+        <div style="flex:1"><h5>HDPE · 950 kg</h5><p>Sold to GreenLoop Polymers · ₹42,750</p></div>
+        <span class="status sold">SOLD</span>
+      </div>
+    </section>
+
+    <!-- ================= PAYMENTS ================= -->
+    <section class="screen" id="screen-payments">
+      <header class="app-header">
+        <div class="brand" style="font-size:22px;">Payments</div>
+        <div class="avatar-wrap" onclick="go('screen-more')"><div class="avatar">AD</div></div>
+      </header>
+
+      <div class="wallet">
+        <div class="w-label">AVAILABLE BALANCE</div>
+        <div class="w-amount">₹4,82,350<small>.00</small></div>
+        <div class="w-meta">
+          <div>In escrow<b>₹1,25,000</b></div>
+          <div>Credit line<b>₹10,00,000</b></div>
+          <div>Due in 12 days<b>₹68,400</b></div>
+        </div>
+        <div class="wallet-actions">
+          <button class="wa-primary">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#0b0c0f" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 14V2M3 7l5-5 5 5"/></svg>
+            Withdraw</button>
+          <button class="wa-ghost">
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v12M3 9l5 5 5-5"/></svg>
+            Add money</button>
+          <button class="wa-ghost">Statement</button>
+        </div>
+      </div>
+
+      <div class="stat-tiles" style="margin-top:16px;">
+        <div class="stat-tile">
+          <div class="s-label">This month sales</div>
+          <div class="s-val">₹6.4L</div>
+          <div class="s-note up">▲ 18% vs last month</div>
+        </div>
+        <div class="stat-tile">
+          <div class="s-label">Pending invoices</div>
+          <div class="s-val">3</div>
+          <div class="s-note" style="color:#fba263;">₹1.9L awaiting buyers</div>
+        </div>
+      </div>
+
+      <div class="section-head" style="padding-top:6px;">
+        <h3>Recent transactions</h3>
+        <span class="link">Filter</span>
+      </div>
+
+      <div class="txn">
+        <div class="t-ic in"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 3 13M13 13V3H3" transform="rotate(90 8 8)"/></svg></div>
+        <div class="t-body"><h5>GreenLoop Polymers</h5><p>HDPE lot · UTR 928417 · Today, 11:24 AM</p></div>
+        <div class="t-amt credit">+₹42,750<span>Settled</span></div>
+      </div>
+      <div class="txn">
+        <div class="t-ic pend"><svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#fba263" stroke-width="2" stroke-linecap="round"><circle cx="8" cy="8" r="6.4"/><path d="M8 4.6V8l2.4 1.6"/></svg></div>
+        <div class="t-body"><h5>Escrow hold · PET listing</h5><p>Released after buyer QC · Est. 4 Jul</p></div>
+        <div class="t-amt">₹1,25,000<span>In escrow</span></div>
+      </div>
+      <div class="txn">
+        <div class="t-ic out"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="#ff5a5a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13 13 3M3 3v10h10" transform="rotate(90 8 8)"/></svg></div>
+        <div class="t-body"><h5>UPSolid Logistics</h5><p>Pickup charges · 30 Jun, 5:02 PM</p></div>
+        <div class="t-amt">−₹3,200<span>Paid</span></div>
+      </div>
+      <div class="txn">
+        <div class="t-ic in"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 3 13M13 13V3H3" transform="rotate(90 8 8)"/></svg></div>
+        <div class="t-body"><h5>Shakti Steels</h5><p>CRC lot · UTR 917204 · 28 Jun</p></div>
+        <div class="t-amt credit">+₹1,28,000<span>Settled</span></div>
+      </div>
+      <div class="txn">
+        <div class="t-ic out"><svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="#ff5a5a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13 13 3M3 3v10h10" transform="rotate(90 8 8)"/></svg></div>
+        <div class="t-body"><h5>Credit repayment</h5><p>EMI 4 of 12 · 26 Jun</p></div>
+        <div class="t-amt">−₹34,200<span>Paid</span></div>
+      </div>
+    </section>
+
+    <!-- ================= MORE ================= -->
+    <section class="screen" id="screen-more">
+      <header class="app-header">
+        <div class="brand" style="font-size:22px;">More</div>
+      </header>
+
+      <div class="profile-card">
+        <div class="avatar">AD</div>
+        <div style="flex:1;">
+          <h4>Aarav Desai</h4>
+          <p>Desai Polymers Pvt Ltd · Ahmedabad</p>
+          <span class="kyc-pill">
+            <svg width="11" height="11" viewBox="0 0 14 14" fill="none" stroke="#fba263" stroke-width="1.8"><circle cx="7" cy="7" r="6"/><path d="M7 4v3.5M7 10v.3" stroke-linecap="round"/></svg>
+            KYC pending
+          </span>
+        </div>
+        <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+      </div>
+
+      <div class="menu-group">
+        <div class="g-title">Account</div>
+        <button class="menu-item" onclick="go('screen-kyc')">
+          <div class="m-ic" style="background:rgba(61,107,255,.12);"><svg width="18" height="21" viewBox="0 0 42 48" fill="none" stroke="#7ea0ff" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 38 8v13c0 11-7.5 19.5-17 23C11.5 40.5 4 32 4 21V8l17-6z"/><path d="M13 23l6 6 10-11"/></svg></div>
+          <div class="grow"><h5>Complete KYC</h5><p>2 mins via DigiLocker</p></div>
+          <span class="status review">PENDING</span>
+        </button>
+        <button class="menu-item" onclick="go('screen-gst')">
+          <div class="m-ic" style="background:rgba(249,115,22,.12);"><svg width="17" height="20" viewBox="0 0 42 48" fill="none" stroke="#fba263" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10M11 24h14M11 32h10"/></svg></div>
+          <div class="grow"><h5>GST Locker</h5><p>12 invoices stored</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(47,184,168,.12);"><svg width="19" height="19" viewBox="0 0 28 28" fill="none" stroke="#2fb8a8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h22v14a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8z"/><path d="M3 8l4-5h14l4 5M14 3v5"/></svg></div>
+          <div class="grow"><h5>Saved addresses</h5><p>2 pickup locations</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div class="menu-group">
+        <div class="g-title">Services</div>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(61,107,255,.12);"><svg width="21" height="17" viewBox="0 0 52 42" fill="none" stroke="#7ea0ff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="28" height="22" rx="3"/><path d="M30 14h9l7 8v8h-16z"/><circle cx="12" cy="34" r="4.5"/><circle cx="38" cy="34" r="4.5"/></svg></div>
+          <div class="grow"><h5>Logistics &amp; pickups</h5><p>1 pickup scheduled tomorrow</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+        <button class="menu-item" onclick="go('screen-payments')">
+          <div class="m-ic" style="background:rgba(140,224,60,.10);"><svg width="19" height="19" viewBox="0 0 46 46" fill="none" stroke="#8ce03c" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="23" cy="23" r="19"/><path d="M16 14h13M16 20h13M17 14c4 0 7 2 7 6s-3 6-7 6l9 8"/></svg></div>
+          <div class="grow"><h5>Credit line</h5><p>₹10L sanctioned · ₹3.2L used</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(139,92,246,.12);"><svg width="17" height="20" viewBox="0 0 42 48" fill="none" stroke="#b39bfa" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 38 8v13c0 11-7.5 19.5-17 23C11.5 40.5 4 32 4 21V8l17-6z"/></svg></div>
+          <div class="grow"><h5>Transaction insurance</h5><p>Covers up to ₹25L per deal</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div class="menu-group">
+        <div class="g-title">Support</div>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(255,255,255,.06);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa1ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.2 9a2.8 2.8 0 0 1 5.5.7c0 1.8-2.7 2.3-2.7 3.8M12 17v.3"/></svg></div>
+          <div class="grow"><h5>Help centre</h5><p>FAQs, chat &amp; call support</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(255,255,255,.06);"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9aa1ad" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></div>
+          <div class="grow"><h5>Settings</h5><p>Language, notifications, privacy</p></div>
+          <svg width="7" height="12" viewBox="0 0 8 14" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>
+        </button>
+        <button class="menu-item">
+          <div class="m-ic" style="background:rgba(255,90,90,.10);"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#ff5a5a" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg></div>
+          <div class="grow"><h5 style="color:#ff7b7b;">Log out</h5></div>
+        </button>
+      </div>
+      <p style="text-align:center;font-size:12px;color:#4b5160;margin-top:20px;">Recykal.market v4.2.0 · Made in India 🇮🇳</p>
+    </section>
+
+    <!-- ================= KYC (sub) ================= -->
+    <section class="screen" id="screen-kyc">
+      <header class="sub-header">
+        <button class="back-btn" onclick="go('screen-home')">
+          <svg width="16" height="14" viewBox="0 0 18 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7H1M7 1 1 7l6 6"/></svg>
+        </button>
+        <div><h2>Complete your KYC</h2><div class="sub">Takes about 2 minutes</div></div>
+      </header>
+
+      <div class="kyc-hero">
+        <div class="kyc-shield">
+          <svg width="52" height="58" viewBox="0 0 42 48" fill="none" stroke="#8fb2ff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2 38 8v13c0 11-7.5 19.5-17 23C11.5 40.5 4 32 4 21V8l17-6z"/><path d="M13 23l6 6 10-11"/></svg>
+        </div>
+        <h3>2 mins KYC</h3>
+        <p>Verify your identity instantly and securely through DigiLocker to unlock selling, credit and instant payouts.</p>
+      </div>
+
+      <div class="kyc-steps">
+        <div class="kyc-step">
+          <div class="num done">
+            <svg width="16" height="13" viewBox="0 0 16 13" fill="none" stroke="#8ce03c" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7l5 5L15 1"/></svg>
+          </div>
+          <div><h5>Mobile verified</h5><p>+91 98••• ••210 linked to account</p></div>
+        </div>
+        <div class="kyc-step">
+          <div class="num">2</div>
+          <div><h5>Connect DigiLocker</h5><p>Fetch Aadhaar &amp; PAN — no uploads needed</p></div>
+        </div>
+        <div class="kyc-step">
+          <div class="num">3</div>
+          <div><h5>Business details</h5><p>GSTIN auto-verified from GST records</p></div>
+        </div>
+        <div class="kyc-step">
+          <div class="num">4</div>
+          <div><h5>Bank account</h5><p>Penny-drop verification for payouts</p></div>
+        </div>
+      </div>
+
+      <button class="btn-primary" onclick="go('screen-success')">Continue with DigiLocker
+        <svg width="20" height="14" viewBox="0 0 20 14" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1 7h17M12 1l6 6-6 6"/></svg>
+      </button>
+      <div class="secure-note">
+        <svg width="12" height="14" viewBox="0 0 12 14" fill="none" stroke="#6b7280" stroke-width="1.6"><rect x="1" y="6" width="10" height="7" rx="1.6"/><path d="M3.5 6V4.5a2.5 2.5 0 0 1 5 0V6"/></svg>
+        256-bit encrypted · Approved by UIDAI &amp; MeitY
+      </div>
+    </section>
+
+    <!-- ================= MARKET PRICES (sub) ================= -->
+    <section class="screen" id="screen-market">
+      <header class="sub-header">
+        <button class="back-btn" onclick="go('screen-home')">
+          <svg width="16" height="14" viewBox="0 0 18 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7H1M7 1 1 7l6 6"/></svg>
+        </button>
+        <div><h2>Live market prices</h2><div class="sub">Updated 9:41 AM · Ahmedabad hub</div></div>
+      </header>
+
+      <div class="chip-row">
+        <button class="chip on">All</button>
+        <button class="chip">Plastics</button>
+        <button class="chip">Metals</button>
+        <button class="chip">Paper</button>
+        <button class="chip">E-waste</button>
+      </div>
+
+      <div class="price-row">
+        <div class="p-ic blue"><svg width="20" height="26" viewBox="0 0 24 32" fill="none" stroke="#3d6bff" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M4 16h16M4 22h16"/></svg></div>
+        <div class="p-body"><h4>PET</h4><div class="p-sub">Clear flakes · Grade A</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 18 12 15 20 17 30 10 40 12 54 4" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹50/kg</div><div class="p-delta up">▲ 10%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic green"><svg width="22" height="26" viewBox="0 0 26 32" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linejoin="round"><path d="M7 6h10l4 5v16a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V11l4-5z"/><rect x="8" y="15" width="8" height="9" rx="1.5"/></svg></div>
+        <div class="p-body"><h4>CRC</h4><div class="p-sub">Cold-rolled coil scrap</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 16 12 17 20 12 30 14 40 8 54 6" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹40/kg</div><div class="p-delta up">▲ 10%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic purple"><svg width="20" height="26" viewBox="0 0 24 32" fill="none" stroke="#8b5cf6" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M8 14h4v5H8zM13 21h4"/></svg></div>
+        <div class="p-body"><h4>HDPE</h4><div class="p-sub">Blue drum regrind</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 19 12 16 20 18 30 12 40 13 54 7" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹45/kg</div><div class="p-delta up">▲ 8%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic teal"><svg width="22" height="22" viewBox="0 0 28 28" fill="none" stroke="#2fb8a8" stroke-width="2" stroke-linejoin="round"><path d="M3 8h22v14a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V8z"/><path d="M3 8l4-5h14l4 5M14 3v5"/></svg></div>
+        <div class="p-body"><h4>Cartons (OCC)</h4><div class="p-sub">Old corrugated containers</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 10 12 12 20 11 30 15 40 14 54 18" stroke="#ff5a5a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹14/kg</div><div class="p-delta down">▼ 3%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic blue"><svg width="20" height="26" viewBox="0 0 24 32" fill="none" stroke="#3d6bff" stroke-width="2" stroke-linejoin="round"><path d="M9 2h6v4c3 2 5 4.5 5 8v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V14c0-3.5 2-6 5-8V2z"/><path d="M4 12h16"/></svg></div>
+        <div class="p-body"><h4>LDPE</h4><div class="p-sub">Natural film · baled</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 14 12 13 20 15 30 11 40 12 54 9" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹32/kg</div><div class="p-delta up">▲ 4%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic orange"><svg width="22" height="22" viewBox="0 0 28 28" fill="none" stroke="#f97316" stroke-width="2" stroke-linejoin="round"><rect x="3" y="6" width="22" height="16" rx="2"/><path d="M8 22v3M20 22v3M8 11h12M8 15h7"/></svg></div>
+        <div class="p-body"><h4>E-waste (PCB)</h4><div class="p-sub">Mixed boards · Grade B</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 20 12 17 20 18 30 12 40 9 54 5" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹120/kg</div><div class="p-delta up">▲ 6%</div></div>
+      </div>
+      <div class="price-row">
+        <div class="p-ic green"><svg width="22" height="22" viewBox="0 0 28 28" fill="none" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="14" cy="14" r="11"/><path d="M9 14h10M14 9v10"/></svg></div>
+        <div class="p-body"><h4>Aluminium (UBC)</h4><div class="p-sub">Used beverage cans</div></div>
+        <svg class="spark" width="56" height="24" viewBox="0 0 56 24" fill="none"><path d="M2 12 12 14 20 10 30 13 40 11 54 8" stroke="#8ce03c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="p-val"><div class="p-price">₹142/kg</div><div class="p-delta up">▲ 2%</div></div>
+      </div>
+
+      <button class="btn-ghost" style="margin-top:10px;" onclick="go('screen-sell')">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#d7dbe3" stroke-width="2.2" stroke-linecap="round"><path d="M8 2v12M2 8h12"/></svg>
+        Sell at these prices
+      </button>
+    </section>
+
+    <!-- ================= GST LOCKER (sub) ================= -->
+    <section class="screen" id="screen-gst">
+      <header class="sub-header">
+        <button class="back-btn" onclick="go('screen-home')">
+          <svg width="16" height="14" viewBox="0 0 18 14" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 7H1M7 1 1 7l6 6"/></svg>
+        </button>
+        <div><h2>GST Locker</h2><div class="sub">GSTIN 24AAACD1234F1Z5 · Verified</div></div>
+      </header>
+
+      <div class="stat-tiles">
+        <div class="stat-tile">
+          <div class="s-label">Invoices stored</div>
+          <div class="s-val">12</div>
+          <div class="s-note" style="color:#9aa1ad;">FY 2026-27</div>
+        </div>
+        <div class="stat-tile">
+          <div class="s-label">Input tax credit</div>
+          <div class="s-val">₹86,420</div>
+          <div class="s-note up">Auto-reconciled</div>
+        </div>
+      </div>
+
+      <div class="section-head" style="padding-top:0;">
+        <h3>Recent invoices</h3>
+        <span class="link">Filter</span>
+      </div>
+
+      <div class="doc-row">
+        <div class="d-ic"><svg width="18" height="22" viewBox="0 0 42 48" fill="none" stroke="#fba263" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10"/></svg></div>
+        <div style="flex:1;"><h5>INV-2026-0147 · GreenLoop Polymers</h5><p>HDPE 950 kg · ₹42,750 + GST · 2 Jul 2026</p></div>
+        <span class="status live">FILED</span>
+      </div>
+      <div class="doc-row">
+        <div class="d-ic"><svg width="18" height="22" viewBox="0 0 42 48" fill="none" stroke="#fba263" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10"/></svg></div>
+        <div style="flex:1;"><h5>INV-2026-0146 · Shakti Steels</h5><p>CRC 3,200 kg · ₹1,28,000 + GST · 28 Jun 2026</p></div>
+        <span class="status live">FILED</span>
+      </div>
+      <div class="doc-row">
+        <div class="d-ic"><svg width="18" height="22" viewBox="0 0 42 48" fill="none" stroke="#fba263" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10"/></svg></div>
+        <div style="flex:1;"><h5>INV-2026-0145 · UPSolid Logistics</h5><p>Freight ₹3,200 + GST · 30 Jun 2026</p></div>
+        <span class="status review">GSTR-2B PENDING</span>
+      </div>
+      <div class="doc-row">
+        <div class="d-ic"><svg width="18" height="22" viewBox="0 0 42 48" fill="none" stroke="#fba263" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h18l10 10v30a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3z"/><path d="M26 2v10h10"/></svg></div>
+        <div style="flex:1;"><h5>INV-2026-0144 · Meru Plastics</h5><p>PET 1,100 kg · ₹53,900 + GST · 24 Jun 2026</p></div>
+        <span class="status live">FILED</span>
+      </div>
+
+      <button class="btn-primary" style="margin-top:14px;">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 11V2M4 7l4 4 4-4M2 14h12"/></svg>
+        Upload invoice
+      </button>
+    </section>
+
+    <!-- ================= SUCCESS (sub) ================= -->
+    <section class="screen" id="screen-success">
+      <div class="success-wrap">
+        <div class="success-ring">
+          <svg width="52" height="42" viewBox="0 0 34 27" fill="none" stroke="#8ce03c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14l10 10L32 3"/></svg>
+        </div>
+        <h3>Listing posted!</h3>
+        <p>Your PET lot is live on the marketplace. Verified buyers in your region have been notified — expect offers within a few hours.</p>
+
+        <div class="success-detail">
+          <div class="row"><span>Listing ID</span><b>#RM-84721</b></div>
+          <div class="row"><span>Material</span><b>PET · Clear flakes · 2,500 kg</b></div>
+          <div class="row"><span>Expected price</span><b>₹50/kg</b></div>
+          <div class="row"><span>Estimated payout</span><b style="color:#8ce03c;">₹1,25,000</b></div>
+          <div class="row"><span>Pickup</span><b>Tomorrow · UPSolid Logistics</b></div>
+        </div>
+
+        <button class="btn-primary" style="margin-top:24px;" onclick="go('screen-sell')">Track offers</button>
+        <button class="btn-ghost" style="margin-top:10px;" onclick="go('screen-home')">Back to home</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Bottom navigation -->
+  <nav class="bottom-nav" id="bottomNav">
+    <button class="nav-item active" data-screen="screen-home" onclick="go('screen-home')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 20v-9.5z"/><path d="M9.5 21.5v-7h5v7"/></svg>
+      Home
+    </button>
+    <button class="nav-item" data-screen="screen-news" onclick="go('screen-news')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+      News
+    </button>
+    <button class="nav-item" data-screen="screen-sell" onclick="go('screen-sell')">
+      <span class="fab">
+        <svg width="26" height="26" viewBox="0 0 26 26" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><path d="M13 4v18M4 13h18"/></svg>
+      </span>
+      List
+    </button>
+    <button class="nav-item" data-screen="screen-payments" onclick="go('screen-payments')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6 15h4"/></svg>
+      Payments
+    </button>
+    <button class="nav-item" data-screen="screen-more" onclick="go('screen-more')">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><circle cx="7" cy="7" r="2.4"/><circle cx="17" cy="7" r="2.4"/><circle cx="7" cy="17" r="2.4"/><circle cx="17" cy="17" r="2.4"/></svg>
+      More
+    </button>
+  </nav>
+
+  <div class="home-indicator"></div>
+</div>
+
+<script>
+  const TAB_SCREENS = ["screen-home", "screen-news", "screen-sell", "screen-payments", "screen-more"];
+
+  function go(id) {
+    document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+    const target = document.getElementById(id);
+    target.classList.add("active");
+    target.scrollTop = 0;
+
+    // nav highlight only for main tabs; sub-screens keep nav but clear highlight
+    document.querySelectorAll(".nav-item").forEach(n => {
+      n.classList.toggle("active", n.dataset.screen === id);
+    });
+  }
+
+  function selectMat(el) {
+    el.parentElement.querySelectorAll(".mat-card").forEach(c => c.classList.remove("sel"));
+    el.classList.add("sel");
+  }
+
+  // chip toggles (visual only)
+  document.querySelectorAll(".chip-row").forEach(row => {
+    row.querySelectorAll(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        row.querySelectorAll(".chip").forEach(c => c.classList.remove("on"));
+        chip.classList.add("on");
+      });
+    });
+  });
+
+  // segmented control toggles (visual only)
+  document.querySelectorAll(".seg").forEach(seg => {
+    seg.querySelectorAll("button").forEach(btn => {
+      btn.addEventListener("click", () => {
+        seg.querySelectorAll("button").forEach(b => b.classList.remove("on"));
+        btn.classList.add("on");
+      });
+    });
+  });
+</script>
+</body>
+</html>
