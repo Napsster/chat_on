@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recykal Chatbot - File Upload Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 600px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        /* Login Form */
+        .login-section {
+            display: block;
+        }
+
+        .login-section.hidden {
+            display: none;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="email"],
+        input[type="file"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="email"]:focus,
+        input[type="file"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .button:active {
+            transform: translateY(0);
+        }
+
+        .button.secondary {
+            background: #f0f0f0;
+            color: #333;
+            margin-top: 10px;
+        }
+
+        .button.secondary:hover {
+            background: #e0e0e0;
+            box-shadow: none;
+        }
+
+        /* Upload Section */
+        .upload-section {
+            display: none;
+        }
+
+        .upload-section.active {
+            display: block;
+        }
+
+        .user-info {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .user-info span {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .user-info strong {
+            color: #333;
+        }
+
+        .file-upload-area {
+            border: 2px dashed #667eea;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #f8f9ff;
+        }
+
+        .file-upload-area:hover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+        }
+
+        .file-upload-area.dragover {
+            border-color: #764ba2;
+            background: #f0f2ff;
+            transform: scale(1.02);
+        }
+
+        .file-upload-area svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 15px;
+            opacity: 0.7;
+        }
+
+        .file-upload-area p {
+            color: #667eea;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .file-upload-area small {
+            color: #999;
+            display: block;
+            font-size: 12px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .file-list {
+            margin-top: 20px;
+        }
+
+        .file-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .file-item.selected {
+            background: #e8f0ff;
+            border-left: 4px solid #667eea;
+        }
+
+        .file-name {
+            color: #333;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .file-size {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .remove-file {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 4px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .remove-file:hover {
+            background: #ff5252;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            color: #999;
+            font-weight: 600;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .alert {
+            padding: 12px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .alert.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        .logout-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: 1px solid white;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        @media (max-width: 600px) {
+            .content {
+                padding: 20px;
+            }
+
+            .header {
+                padding: 20px 20px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .user-info {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🤖 Recykal Chatbot</h1>
+            <p>File Upload Portal</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content">
+            <!-- Login Section -->
+            <div class="login-section" id="loginSection">
+                <h2 style="margin-bottom: 20px; color: #333;">Login</h2>
+
+                <div id="loginAlert"></div>
+
+                <form id="loginForm">
+                    <div class="form-group">
+                        <label for="loginUser">Username or Email</label>
+                        <input type="text" id="loginUser" name="username" required placeholder="Enter your username or email">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="loginPass">Password</label>
+                        <input type="password" id="loginPass" name="password" required placeholder="Enter your password">
+                    </div>
+
+                    <button type="submit" class="button">Login</button>
+                </form>
+
+                <div style="text-align: center; margin-top: 20px; color: #999; font-size: 14px;">
+                    Don't have an account? <a href="#" onclick="toggleSignup()" style="color: #667eea; text-decoration: none; font-weight: 600;">Sign up</a>
+                </div>
+
+                <!-- Signup Form (Hidden by default) -->
+                <div id="signupForm" style="display: none; margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e0e0;">
+                    <h3 style="margin-bottom: 20px; color: #333;">Create Account</h3>
+
+                    <form id="registerForm">
+                        <div class="form-group">
+                            <label for="signupName">Full Name</label>
+                            <input type="text" id="signupName" name="fullname" required placeholder="Your full name">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="signupEmail">Email</label>
+                            <input type="email" id="signupEmail" name="email" required placeholder="your@email.com">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="signupUser">Username</label>
+                            <input type="text" id="signupUser" name="username" required placeholder="Choose a username">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="signupPass">Password</label>
+                            <input type="password" id="signupPass" name="password" required placeholder="Create a strong password">
+                        </div>
+
+                        <button type="submit" class="button">Create Account</button>
+                        <button type="button" class="button secondary" onclick="toggleSignup()">Back to Login</button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Upload Section -->
+            <div class="upload-section" id="uploadSection">
+                <div style="position: relative;">
+                    <button class="logout-btn" onclick="logout()">Logout</button>
+                </div>
+
+                <div class="user-info">
+                    <span>Logged in as: <strong id="currentUser"></strong></span>
+                </div>
+
+                <!-- Tabs -->
+                <div class="tabs">
+                    <button class="tab-button active" onclick="switchTab('upload')">📤 Upload Files</button>
+                    <button class="tab-button" onclick="switchTab('text')">📝 Add Text Content</button>
+                    <button class="tab-button" onclick="switchTab('history')">📋 Upload History</button>
+                </div>
+
+                <!-- Upload Tab -->
+                <div id="uploadTab" class="tab-content active">
+                    <div id="uploadAlert"></div>
+
+                    <div class="file-upload-area" id="dropZone">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        <p>Drag and drop files here</p>
+                        <small>or click to select files</small>
+                    </div>
+                    <input type="file" id="fileInput" multiple accept=".md,.txt,.pdf,.docx">
+
+                    <div class="file-list" id="fileList"></div>
+
+                    <div id="uploadProgress" style="display: none;">
+                        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Uploading...</p>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                    </div>
+
+                    <button type="button" class="button" id="uploadBtn" style="display: none;">Upload Files</button>
+                </div>
+
+                <!-- Text Content Tab -->
+                <div id="textTab" class="tab-content">
+                    <div id="textAlert"></div>
+
+                    <div class="form-group">
+                        <label for="textTitle">Title</label>
+                        <input type="text" id="textTitle" placeholder="e.g., Company Policies">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="textContent">Content</label>
+                        <textarea id="textContent" placeholder="Enter markdown content here..."></textarea>
+                    </div>
+
+                    <button type="button" class="button" onclick="uploadText()">Add Content</button>
+                </div>
+
+                <!-- History Tab -->
+                <div id="historyTab" class="tab-content">
+                    <div id="historyAlert"></div>
+                    <div id="uploadHistory" style="margin-top: 20px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let currentUser = null;
+        let selectedFiles = [];
+        let uploadedFiles = [];
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            const savedUser = localStorage.getItem('chatbot_user');
+            if (savedUser) {
+                currentUser = JSON.parse(savedUser);
+                showUploadInterface();
+            }
+
+            // File upload events
+            document.getElementById('dropZone').addEventListener('click', () => {
+                document.getElementById('fileInput').click();
+            });
+
+            document.getElementById('dropZone').addEventListener('dragover', (e) => {
+                e.preventDefault();
+                document.getElementById('dropZone').classList.add('dragover');
+            });
+
+            document.getElementById('dropZone').addEventListener('dragleave', () => {
+                document.getElementById('dropZone').classList.remove('dragover');
+            });
+
+            document.getElementById('dropZone').addEventListener('drop', (e) => {
+                e.preventDefault();
+                document.getElementById('dropZone').classList.remove('dragover');
+                handleFiles(e.dataTransfer.files);
+            });
+
+            document.getElementById('fileInput').addEventListener('change', (e) => {
+                handleFiles(e.target.files);
+            });
+
+            // Login form
+            document.getElementById('loginForm').addEventListener('submit', handleLogin);
+            document.getElementById('registerForm').addEventListener('submit', handleSignup);
+
+            // Load upload history
+            loadUploadHistory();
+        });
+
+        // File handling
+        function handleFiles(files) {
+            selectedFiles = Array.from(files).filter(file => {
+                const validTypes = ['text/plain', 'text/markdown', 'application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+                const validExt = ['.md', '.txt', '.pdf', '.docx'];
+
+                const isValid = validTypes.includes(file.type) ||
+                               validExt.some(ext => file.name.toLowerCase().endsWith(ext));
+
+                if (!isValid) {
+                    showAlert('uploadAlert', `${file.name} is not a supported file type`, 'error');
+                }
+
+                return isValid;
+            });
+
+            renderFileList();
+
+            if (selectedFiles.length > 0) {
+                document.getElementById('uploadBtn').style.display = 'block';
+            }
+        }
+
+        function renderFileList() {
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+
+            selectedFiles.forEach((file, index) => {
+                const fileSize = (file.size / 1024).toFixed(2) + ' KB';
+                const fileItem = document.createElement('div');
+                fileItem.className = 'file-item selected';
+                fileItem.innerHTML = `
+                    <div>
+                        <div class="file-name">${file.name}</div>
+                        <div class="file-size">${fileSize}</div>
+                    </div>
+                    <button type="button" class="remove-file" onclick="removeFile(${index})">Remove</button>
+                `;
+                fileList.appendChild(fileItem);
+            });
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            renderFileList();
+
+            if (selectedFiles.length === 0) {
+                document.getElementById('uploadBtn').style.display = 'none';
+            }
+        }
+
+        // Authentication
+        function handleLogin(e) {
+            e.preventDefault();
+            const username = document.getElementById('loginUser').value;
+            const password = document.getElementById('loginPass').value;
+
+            // Simple demo authentication (replace with API call)
+            if (username && password.length >= 6) {
+                currentUser = {
+                    username: username,
+                    loginTime: new Date().toISOString()
+                };
+
+                localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
+                showAlert('loginAlert', 'Login successful!', 'success');
+
+                setTimeout(() => {
+                    showUploadInterface();
+                }, 1000);
+            } else {
+                showAlert('loginAlert', 'Invalid username or password', 'error');
+            }
+        }
+
+        function handleSignup(e) {
+            e.preventDefault();
+            const fullname = document.getElementById('signupName').value;
+            const email = document.getElementById('signupEmail').value;
+            const username = document.getElementById('signupUser').value;
+            const password = document.getElementById('signupPass').value;
+
+            if (password.length < 6) {
+                showAlert('loginAlert', 'Password must be at least 6 characters', 'error');
+                return;
+            }
+
+            currentUser = {
+                fullname: fullname,
+                email: email,
+                username: username,
+                signupTime: new Date().toISOString()
+            };
+
+            localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
+            showAlert('loginAlert', 'Account created and logged in!', 'success');
+
+            setTimeout(() => {
+                showUploadInterface();
+            }, 1000);
+        }
+
+        function logout() {
+            if (confirm('Are you sure you want to logout?')) {
+                currentUser = null;
+                localStorage.removeItem('chatbot_user');
+                selectedFiles = [];
+                document.getElementById('fileInput').value = '';
+                showLoginInterface();
+                showAlert('loginAlert', 'Logged out successfully', 'info');
+            }
+        }
+
+        // UI Switching
+        function showLoginInterface() {
+            document.getElementById('loginSection').style.display = 'block';
+            document.getElementById('uploadSection').classList.remove('active');
+            document.getElementById('uploadSection').style.display = 'none';
+        }
+
+        function showUploadInterface() {
+            document.getElementById('loginSection').style.display = 'none';
+            document.getElementById('uploadSection').classList.add('active');
+            document.getElementById('uploadSection').style.display = 'block';
+            document.getElementById('currentUser').textContent = currentUser.username || currentUser.email;
+        }
+
+        function toggleSignup() {
+            const form = document.getElementById('signupForm');
+            form.style.display = form.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function switchTab(tab) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-button').forEach(el => {
+                el.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tab + 'Tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Upload functions
+        async function uploadFiles() {
+            if (selectedFiles.length === 0) {
+                showAlert('uploadAlert', 'No files selected', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            selectedFiles.forEach(file => {
+                formData.append('files', file);
+            });
+            formData.append('username', currentUser.username);
+
+            document.getElementById('uploadProgress').style.display = 'block';
+            document.getElementById('uploadBtn').disabled = true;
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('uploadAlert', `Successfully uploaded ${selectedFiles.length} file(s)!`, 'success');
+                    selectedFiles = [];
+                    document.getElementById('fileInput').value = '';
+                    renderFileList();
+                    document.getElementById('uploadBtn').style.display = 'none';
+                    loadUploadHistory();
+                } else {
+                    showAlert('uploadAlert', data.error || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showAlert('uploadAlert', 'Error uploading files: ' + error.message, 'error');
+            } finally {
+                document.getElementById('uploadProgress').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = false;
+            }
+        }
+
+        async function uploadText() {
+            const title = document.getElementById('textTitle').value;
+            const content = document.getElementById('textContent').value;
+
+            if (!title || !content) {
+                showAlert('textAlert', 'Please fill in all fields', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/upload/text', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: currentUser.username,
+                        title: title,
+                        content: content
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showAlert('textAlert', 'Content added successfully!', 'success');
+                    document.getElementById('textTitle').value = '';
+                    document.getElementById('textContent').value = '';
+                    loadUploadHistory();
+                } else {
+                    showAlert('textAlert', data.error || 'Upload failed', 'error');
+                }
+            } catch (error) {
+                showAlert('textAlert', 'Error uploading content: ' + error.message, 'error');
+            }
+        }
+
+        function loadUploadHistory() {
+            if (!currentUser) return;
+
+            fetch(`/upload/history?username=${currentUser.username}`)
+                .then(response => response.json())
+                .then(data => {
+                    const historyDiv = document.getElementById('uploadHistory');
+                    if (data.files && data.files.length > 0) {
+                        historyDiv.innerHTML = data.files.map(file => `
+                            <div class="file-item">
+                                <div>
+                                    <div class="file-name">${file.name}</div>
+                                    <div class="file-size">${new Date(file.uploadedAt).toLocaleString()}</div>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        historyDiv.innerHTML = '<p style="color: #999; text-align: center;">No uploads yet</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading history:', error);
+                    showAlert('historyAlert', 'Could not load upload history', 'error');
+                });
+        }
+
+        // Utility functions
+        function showAlert(elementId, message, type) {
+            const alertDiv = document.getElementById(elementId);
+            alertDiv.innerHTML = `<div class="alert ${type}">${message}</div>`;
+
+            if (type === 'success') {
+                setTimeout(() => {
+                    alertDiv.innerHTML = '';
+                }, 5000);
+            }
+        }
+
+        // Upload button click handler
+        document.addEventListener('click', function(e) {
+            if (e.target && e.target.id === 'uploadBtn') {
+                uploadFiles();
+            }
+        });
+    </script>
+</body>
+</html>

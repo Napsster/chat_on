@@ -1,0 +1,66 @@
+# Virtual environment
+venv/
+env/
+ENV/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Dependencies
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Uploads directory (but keep structure)
+uploads/*
+!uploads/.gitkeep
+
+# Knowledge base
+knowledge.md
+knowledge.vec.npz
+*.vec.npz
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Google credentials (NEVER commit)
+google-credentials.json
+
+# Backups
+*.backup
+*.bak
