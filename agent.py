@@ -23,6 +23,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 
 from vector_store import VectorStore
 from lookup_store import CandidateDirectory
+from google_drive_sync import GoogleDriveSync
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
 
 logging.basicConfig(
@@ -53,15 +54,62 @@ DIRECTORY = CandidateDirectory(APP_DIR)
 
 # --- Knowledge base (single source of truth) ------------------------------
 KNOWLEDGE_FILE = APP_DIR / "knowledge.md"
-try:
-    KNOWLEDGE_BASE = KNOWLEDGE_FILE.read_text(encoding="utf-8")
-except Exception as e:
-    logger.warning(f"Could not load knowledge.md: {e}")
-    KNOWLEDGE_BASE = ""
-
-# --- Vector memory: retrieve only relevant chunks per query ----------------
 TOP_K = 8
-VSTORE = VectorStore(KNOWLEDGE_FILE)
+
+
+def reload_knowledge_base():
+    """(Re)load knowledge.md and rebuild the vector store from its current content."""
+    global KNOWLEDGE_BASE, VSTORE
+    try:
+        KNOWLEDGE_BASE = KNOWLEDGE_FILE.read_text(encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not load knowledge.md: {e}")
+        KNOWLEDGE_BASE = ""
+    VSTORE = VectorStore(KNOWLEDGE_FILE)
+
+
+reload_knowledge_base()
+
+# --- Google Drive sync: optional auto-refresh of knowledge.md ---------------
+# Dormant unless a service account file is actually present — never touches
+# knowledge.md until Drive access is configured (see .env.example).
+GOOGLE_SERVICE_ACCOUNT_FILE = os.environ.get(
+    "GOOGLE_SERVICE_ACCOUNT_FILE", str(APP_DIR / "data" / "service_account.json")
+)
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get(
+    "GOOGLE_DRIVE_FOLDER_ID", "1aGaZa6N2i2CbZ1xY7k9AAzUO9b3hy4Ju"
+)
+GOOGLE_DRIVE_SYNC_TTL_HOURS = float(os.environ.get("GOOGLE_DRIVE_SYNC_TTL_HOURS", "1"))
+
+DRIVE_SYNC = GoogleDriveSync(
+    service_account_file=GOOGLE_SERVICE_ACCOUNT_FILE,
+    folder_id=GOOGLE_DRIVE_FOLDER_ID,
+    cache_dir=str(APP_DIR),
+    cache_ttl_hours=GOOGLE_DRIVE_SYNC_TTL_HOURS,
+)
+
+
+def sync_knowledge_from_drive():
+    """Best-effort refresh of knowledge.md from Drive; no-ops if not configured
+    or if the TTL hasn't elapsed. Only reloads the vector store if the file
+    content actually changed."""
+    if not DRIVE_SYNC.service:
+        return
+    try:
+        before = KNOWLEDGE_FILE.read_bytes()
+    except Exception:
+        before = None
+    success, message = DRIVE_SYNC.sync_knowledge_base()
+    if not success:
+        logger.debug(f"Google Drive sync skipped: {message}")
+        return
+    try:
+        after = KNOWLEDGE_FILE.read_bytes()
+    except Exception:
+        after = None
+    if after != before:
+        logger.info(f"Knowledge base updated from Google Drive: {message}")
+        reload_knowledge_base()
 
 # --- LLM config -----------------------------------------------------------
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -257,6 +305,8 @@ async def whatsapp_webhook(request: Request):
         media = parse_media(form_data)
 
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
+
+        sync_knowledge_from_drive()
 
         user_data = get_user_data(phone)
         is_first_interaction = not user_data["history"]
@@ -567,6 +617,7 @@ async def health():
         "candidate_directory": DIRECTORY.ready,
         "candidate_rows": len(DIRECTORY._index),
         "directory_source": DIRECTORY.source,
+        "google_drive_sync": DRIVE_SYNC.get_sync_status(),
         "upload_dir_exists": Path(f"{PROJECT_DIR}/uploads").exists(),
         "db_initialized": Path(f"{PROJECT_DIR}/chatbot.db").exists(),
     }
@@ -597,6 +648,13 @@ async def startup_event():
     logger.info("=" * 60)
     logger.info(f"Upload directory: {PROJECT_DIR}/uploads")
     logger.info(f"Database: {PROJECT_DIR}/chatbot.db")
+    if DRIVE_SYNC.service:
+        sync_knowledge_from_drive()
+    else:
+        logger.info(
+            f"Google Drive sync not configured (no service account at "
+            f"{GOOGLE_SERVICE_ACCOUNT_FILE}) — knowledge.md stays local-only"
+        )
     logger.info(f"Knowledge base: {KNOWLEDGE_FILE} ({len(KNOWLEDGE_BASE)} chars)")
     logger.info(f"Vector store ready: {VSTORE.ready} ({len(VSTORE.chunks)} chunks)")
     if not DEEPSEEK_API_KEY:
