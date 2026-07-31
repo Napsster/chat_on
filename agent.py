@@ -76,6 +76,12 @@ DEFLECTION = (
     "you can reach them at peopleandculture@recykal.com."
 )
 
+# Shown once, appended to a brand-new user's first reply only.
+FIRST_MESSAGE_DISCLAIMER = (
+    "\n\n_Just so you know: this chat is for general guidance, not an official "
+    "or compliance record — please confirm anything important with People & Culture._"
+)
+
 PERSONA_RULES = f"""You are Maya, the pre-onboarding assistant for Recykal (legal name \
 Rapidue Technologies Pvt Ltd). You chat with brand-new hires over WhatsApp to welcome \
 them and answer their onboarding questions.
@@ -253,6 +259,7 @@ async def whatsapp_webhook(request: Request):
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
 
         user_data = get_user_data(phone)
+        is_first_interaction = not user_data["history"]
 
         # Match the caller against the onboarding log (if configured).
         candidate = DIRECTORY.lookup(phone)
@@ -266,6 +273,8 @@ async def whatsapp_webhook(request: Request):
         if not incoming_message and not media:
             hello = f"Hey {first_name}! 👋" if first_name else "Hey! 👋"
             reply = f"{hello} I'm Maya from Recykal's People & Culture team. How can I help with your onboarding today?"
+            if is_first_interaction:
+                reply += FIRST_MESSAGE_DISCLAIMER
             user_data["history"].append({"role": "assistant", "content": reply})
             save_user_data(phone, user_data)
             resp = MessagingResponse()
@@ -305,6 +314,8 @@ async def whatsapp_webhook(request: Request):
         kb_context = retrieve_context(retrieval_query)
         user_data["history"].append({"role": "user", "content": user_turn})
         reply = generate_reply(user_data, kb_context, profile_block)
+        if is_first_interaction:
+            reply += FIRST_MESSAGE_DISCLAIMER
         user_data["history"].append({"role": "assistant", "content": reply})
         save_user_data(phone, user_data)
 
