@@ -10,10 +10,11 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-import hashlib
 from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
+from password import hash_password, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -84,10 +85,6 @@ class FileUploadManager:
         logger.info(f"FileUploadManager initialized: {upload_dir}")
 
     # User Authentication Methods
-    def hash_password(self, password: str) -> str:
-        """Hash a password using SHA256"""
-        return hashlib.sha256(password.encode()).hexdigest()
-
     def register_user(self, username: str, email: str, password: str, fullname: str = "") -> Tuple[bool, str]:
         """
         Register a new user
@@ -112,7 +109,7 @@ class FileUploadManager:
                 return False, "Username or email already exists"
 
             # Create new user
-            password_hash = self.hash_password(password)
+            password_hash = hash_password(password)
             new_user = User(
                 username=username,
                 email=email,
@@ -151,8 +148,7 @@ class FileUploadManager:
             if not user:
                 return False, "User not found"
 
-            password_hash = self.hash_password(password)
-            if user.password_hash != password_hash:
+            if not verify_password(password, user.password_hash):
                 return False, "Invalid password"
 
             # Update last login
@@ -165,6 +161,20 @@ class FileUploadManager:
         except Exception as e:
             logger.error(f"Authentication error: {e}")
             return False, str(e)
+        finally:
+            session.close()
+
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """Look up a user by username (no password hash in the result) — used by auth.get_current_user"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter(User.username == username).first()
+            if not user:
+                return None
+            return {'id': user.id, 'username': user.username, 'email': user.email, 'fullname': user.fullname}
+        except Exception as e:
+            logger.error(f"Error looking up user: {e}")
+            return None
         finally:
             session.close()
 

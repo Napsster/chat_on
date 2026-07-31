@@ -515,9 +515,11 @@
         // Initialize
         document.addEventListener('DOMContentLoaded', function() {
             const savedUser = localStorage.getItem('chatbot_user');
-            if (savedUser) {
+            const savedToken = localStorage.getItem('chatbot_token');
+            if (savedUser && savedToken) {
                 currentUser = JSON.parse(savedUser);
                 showUploadInterface();
+                loadUploadHistory();
             }
 
             // File upload events
@@ -604,30 +606,42 @@
         }
 
         // Authentication
-        function handleLogin(e) {
+        function authHeaders() {
+            const token = localStorage.getItem('chatbot_token');
+            return token ? { 'Authorization': 'Bearer ' + token } : {};
+        }
+
+        async function handleLogin(e) {
             e.preventDefault();
             const username = document.getElementById('loginUser').value;
             const password = document.getElementById('loginPass').value;
 
-            // Simple demo authentication (replace with API call)
-            if (username && password.length >= 6) {
-                currentUser = {
-                    username: username,
-                    loginTime: new Date().toISOString()
-                };
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('password', password);
 
-                localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
-                showAlert('loginAlert', 'Login successful!', 'success');
+            try {
+                const response = await fetch('/login', { method: 'POST', body: formData });
+                const data = await response.json();
 
-                setTimeout(() => {
-                    showUploadInterface();
-                }, 1000);
-            } else {
-                showAlert('loginAlert', 'Invalid username or password', 'error');
+                if (response.ok && data.success) {
+                    currentUser = { username: data.username };
+                    localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
+                    localStorage.setItem('chatbot_token', data.access_token);
+                    showAlert('loginAlert', 'Login successful!', 'success');
+                    setTimeout(() => {
+                        showUploadInterface();
+                        loadUploadHistory();
+                    }, 500);
+                } else {
+                    showAlert('loginAlert', data.error || 'Invalid username or password', 'error');
+                }
+            } catch (error) {
+                showAlert('loginAlert', 'Error logging in: ' + error.message, 'error');
             }
         }
 
-        function handleSignup(e) {
+        async function handleSignup(e) {
             e.preventDefault();
             const fullname = document.getElementById('signupName').value;
             const email = document.getElementById('signupEmail').value;
@@ -639,30 +653,65 @@
                 return;
             }
 
-            currentUser = {
-                fullname: fullname,
-                email: email,
-                username: username,
-                signupTime: new Date().toISOString()
-            };
+            const formData = new FormData();
+            formData.append('fullname', fullname);
+            formData.append('email', email);
+            formData.append('username', username);
+            formData.append('password', password);
 
-            localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
-            showAlert('loginAlert', 'Account created and logged in!', 'success');
+            try {
+                const response = await fetch('/register', { method: 'POST', body: formData });
+                const data = await response.json();
 
-            setTimeout(() => {
-                showUploadInterface();
-            }, 1000);
+                if (response.ok && data.success) {
+                    showAlert('loginAlert', 'Account created! Logging you in...', 'success');
+                    const loginData = new FormData();
+                    loginData.append('username', username);
+                    loginData.append('password', password);
+                    const loginResp = await fetch('/login', { method: 'POST', body: loginData });
+                    const loginResult = await loginResp.json();
+                    if (loginResp.ok && loginResult.success) {
+                        currentUser = { username: loginResult.username };
+                        localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
+                        localStorage.setItem('chatbot_token', loginResult.access_token);
+                        setTimeout(() => {
+                            showUploadInterface();
+                            loadUploadHistory();
+                        }, 500);
+                    }
+                } else {
+                    showAlert('loginAlert', data.error || 'Could not create account', 'error');
+                }
+            } catch (error) {
+                showAlert('loginAlert', 'Error creating account: ' + error.message, 'error');
+            }
+        }
+
+        function clearSession(message) {
+            currentUser = null;
+            localStorage.removeItem('chatbot_user');
+            localStorage.removeItem('chatbot_token');
+            selectedFiles = [];
+            document.getElementById('fileInput').value = '';
+            showLoginInterface();
+            if (message) showAlert('loginAlert', message, 'info');
         }
 
         function logout() {
             if (confirm('Are you sure you want to logout?')) {
-                currentUser = null;
-                localStorage.removeItem('chatbot_user');
-                selectedFiles = [];
-                document.getElementById('fileInput').value = '';
-                showLoginInterface();
-                showAlert('loginAlert', 'Logged out successfully', 'info');
+                clearSession('Logged out successfully');
             }
+        }
+
+        // Fetch wrapper that attaches the auth token and logs out on 401 (expired/invalid session)
+        async function authedFetch(url, options = {}) {
+            const headers = Object.assign({}, options.headers || {}, authHeaders());
+            const response = await fetch(url, Object.assign({}, options, { headers }));
+            if (response.status === 401) {
+                clearSession('Session expired — please log in again');
+                throw new Error('Session expired');
+            }
+            return response;
         }
 
         // UI Switching
@@ -709,13 +758,12 @@
             selectedFiles.forEach(file => {
                 formData.append('files', file);
             });
-            formData.append('username', currentUser.username);
 
             document.getElementById('uploadProgress').style.display = 'block';
             document.getElementById('uploadBtn').disabled = true;
 
             try {
-                const response = await fetch('/upload', {
+                const response = await authedFetch('/upload', {
                     method: 'POST',
                     body: formData
                 });
@@ -750,13 +798,12 @@
             }
 
             try {
-                const response = await fetch('/upload/text', {
+                const response = await authedFetch('/upload/text', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        username: currentUser.username,
                         title: title,
                         content: content
                     })
@@ -780,7 +827,7 @@
         function loadUploadHistory() {
             if (!currentUser) return;
 
-            fetch(`/upload/history?username=${currentUser.username}`)
+            authedFetch('/upload/history')
                 .then(response => response.json())
                 .then(data => {
                     const historyDiv = document.getElementById('uploadHistory');
@@ -808,7 +855,7 @@
         function loadKnowledgeDocuments() {
             if (!currentUser) return;
 
-            fetch('/knowledge/documents')
+            authedFetch('/knowledge/documents')
                 .then(response => response.json())
                 .then(data => {
                     const div = document.getElementById('knowledgeDocuments');
@@ -847,7 +894,7 @@
         function toggleKnowledgeDocument(id, active) {
             const formData = new FormData();
             formData.append('active', active);
-            fetch(`/knowledge/documents/${id}/toggle`, { method: 'POST', body: formData })
+            authedFetch(`/knowledge/documents/${id}/toggle`, { method: 'POST', body: formData })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
@@ -861,7 +908,7 @@
 
         function deleteKnowledgeDocument(id) {
             if (!confirm('Permanently delete this document from the knowledge base?')) return;
-            fetch(`/knowledge/documents/${id}`, { method: 'DELETE' })
+            authedFetch(`/knowledge/documents/${id}`, { method: 'DELETE' })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {

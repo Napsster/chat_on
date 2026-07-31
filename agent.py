@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime
 
 import requests
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import Response, JSONResponse, FileResponse
 from twilio.twiml.messaging_response import MessagingResponse
 
@@ -25,6 +25,7 @@ from vector_store import VectorStore
 from lookup_store import CandidateDirectory
 from google_drive_sync import GoogleDriveSync
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
+from auth import init_auth, create_token, get_current_user
 
 logging.basicConfig(
     level=logging.INFO,
@@ -397,6 +398,7 @@ upload_manager = FileUploadManager(
     db_path=f"{PROJECT_DIR}/chatbot.db"
 )
 file_processor = UploadedFileProcessor(knowledge_dir=PROJECT_DIR)
+init_auth(upload_manager.get_user_by_username)
 
 # Text formats we can merge directly into the knowledge base. PDFs/DOCX are
 # still saved and tracked as general uploads, just not merged (no extraction
@@ -473,10 +475,13 @@ async def login(
         )
 
         if success:
+            token = create_token(username)
             return JSONResponse({
                 "success": True,
                 "message": message,
-                "username": username
+                "username": username,
+                "access_token": token,
+                "token_type": "bearer"
             })
         else:
             return JSONResponse(
@@ -495,9 +500,10 @@ async def login(
 @app.post("/upload")
 async def upload_files(
     request: Request,
-    username: str = Form(...)
+    current_user: dict = Depends(get_current_user)
 ):
     """Upload files to the chatbot"""
+    username = current_user["username"]
     try:
         form = await request.form()
 
@@ -578,16 +584,16 @@ async def upload_files(
 
 
 @app.post("/upload/text")
-async def upload_text(request: Request):
+async def upload_text(request: Request, current_user: dict = Depends(get_current_user)):
     """Upload text content as markdown"""
     try:
         data = await request.json()
 
-        username = data.get('username')
+        username = current_user["username"]
         title = data.get('title')
         content = data.get('content')
 
-        if not all([username, title, content]):
+        if not all([title, content]):
             return JSONResponse(
                 {"error": "Missing required fields"},
                 status_code=400
@@ -627,16 +633,10 @@ async def upload_text(request: Request):
 
 
 @app.get("/upload/history")
-async def get_upload_history(username: str):
-    """Get upload history for user"""
+async def get_upload_history(current_user: dict = Depends(get_current_user)):
+    """Get upload history for the logged-in user"""
     try:
-        if not username:
-            return JSONResponse(
-                {"error": "Username required"},
-                status_code=400
-            )
-
-        history = upload_manager.get_upload_history(username)
+        history = upload_manager.get_upload_history(current_user["username"])
 
         return JSONResponse({
             "success": True,
@@ -652,7 +652,7 @@ async def get_upload_history(username: str):
 
 
 @app.get("/knowledge/documents")
-async def list_knowledge_documents():
+async def list_knowledge_documents(current_user: dict = Depends(get_current_user)):
     """List every document contributing to (or retired from) the bot's knowledge base"""
     try:
         docs = upload_manager.list_knowledge_documents()
@@ -665,7 +665,7 @@ async def list_knowledge_documents():
 
 
 @app.post("/knowledge/documents/{doc_id}/toggle")
-async def toggle_knowledge_document(doc_id: int, active: bool = Form(...)):
+async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), current_user: dict = Depends(get_current_user)):
     """Activate or deactivate a knowledge document without deleting it"""
     try:
         success, message = upload_manager.set_knowledge_document_active(doc_id, active)
@@ -679,7 +679,7 @@ async def toggle_knowledge_document(doc_id: int, active: bool = Form(...)):
 
 
 @app.delete("/knowledge/documents/{doc_id}")
-async def delete_knowledge_document(doc_id: int):
+async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(get_current_user)):
     """Permanently remove a knowledge document"""
     try:
         success, message = upload_manager.delete_knowledge_document(doc_id)
