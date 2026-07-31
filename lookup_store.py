@@ -20,13 +20,24 @@ import csv
 import io
 import re
 import time
+from datetime import datetime
 from pathlib import Path
 
 import requests
 
 PHONE_HEADER_HINTS = ("phone", "mobile", "whatsapp", "contact", "number", "cell")
 NAME_HEADER_HINTS = ("candidate name", "name", "candidate", "full name")
+STATUS_HEADER_HINTS = ("status", "joining stage", "stage")
+JOIN_DATE_HEADER_HINTS = ("joining date", "date of joining", "doj", "start date")
 REFRESH_TTL = 300  # seconds (for the CSV URL)
+
+# Status-column values → segment. Substring match against the lowercased cell.
+POST_JOIN_STATUS_MARKERS = ("joined", "active", "onboarded", "working", "employee")
+PRE_JOIN_STATUS_MARKERS = (
+    "yet to join", "not joined", "pending", "offer", "upcoming", "candidate", "in progress"
+)
+
+_DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d %b %Y", "%d %B %Y")
 
 
 def normalize_phone(value: str) -> str:
@@ -51,6 +62,8 @@ class CandidateDirectory:
         self._index: dict[str, dict] = {}
         self._phone_col: str | None = None
         self._name_col: str | None = None
+        self._status_col: str | None = None
+        self._join_date_col: str | None = None
         self._loaded_at = 0.0
         self.ready = False
         self._load(force=True)
@@ -112,6 +125,12 @@ class CandidateDirectory:
         ) or next(
             (h for h in headers if "name" in low[h]), None
         )
+        self._status_col = next(
+            (h for h in headers if any(k in low[h] for k in STATUS_HEADER_HINTS)), None
+        )
+        self._join_date_col = next(
+            (h for h in headers if any(k in low[h] for k in JOIN_DATE_HEADER_HINTS)), None
+        )
 
     def _load(self, force: bool = False):
         if not force and (time.time() - self._loaded_at) < REFRESH_TTL:
@@ -149,6 +168,33 @@ class CandidateDirectory:
     def name_of(self, row: dict) -> str | None:
         if row and self._name_col:
             return (row.get(self._name_col) or "").strip() or None
+        return None
+
+    def segment_of(self, row: dict) -> str | None:
+        """"pre_join" (offer accepted, not yet started) or "post_join" (already
+        working), derived from a status-like column if present, else a
+        joining-date column compared to today. None if neither is available
+        or can't be parsed — caller should fall back to asking the user."""
+        if not row:
+            return None
+
+        if self._status_col:
+            status = (row.get(self._status_col) or "").strip().lower()
+            if status:
+                if any(marker in status for marker in POST_JOIN_STATUS_MARKERS):
+                    return "post_join"
+                if any(marker in status for marker in PRE_JOIN_STATUS_MARKERS):
+                    return "pre_join"
+
+        if self._join_date_col:
+            raw = (row.get(self._join_date_col) or "").strip()
+            for fmt in _DATE_FORMATS:
+                try:
+                    join_date = datetime.strptime(raw, fmt)
+                    return "post_join" if join_date.date() <= datetime.now().date() else "pre_join"
+                except ValueError:
+                    continue
+
         return None
 
     def profile_block(self, row: dict) -> str:

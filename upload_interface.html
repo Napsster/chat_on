@@ -76,6 +76,7 @@
         input[type="password"],
         input[type="email"],
         input[type="file"],
+        select,
         textarea {
             width: 100%;
             padding: 12px;
@@ -84,16 +85,32 @@
             font-size: 14px;
             font-family: inherit;
             transition: border-color 0.3s;
+            background: white;
         }
 
         input[type="text"]:focus,
         input[type="password"]:focus,
         input[type="email"]:focus,
         input[type="file"]:focus,
+        select:focus,
         textarea:focus {
             outline: none;
             border-color: #667eea;
         }
+
+        .audience-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 6px;
+            vertical-align: middle;
+        }
+
+        .audience-badge.pre_join { background: #e0e7ff; color: #4338ca; }
+        .audience-badge.post_join { background: #dcfce7; color: #166534; }
+        .audience-badge.both { background: #f3f4f6; color: #6b7280; }
 
         textarea {
             resize: vertical;
@@ -512,6 +529,15 @@
                 <div id="uploadTab" class="tab-content active">
                     <div id="uploadAlert"></div>
 
+                    <div class="form-group">
+                        <label for="uploadAudience">Who should this be visible to?</label>
+                        <select id="uploadAudience">
+                            <option value="both" selected>Everyone (default)</option>
+                            <option value="pre_join">Pre-joining candidates only</option>
+                            <option value="post_join">Current employees only</option>
+                        </select>
+                    </div>
+
                     <div class="file-upload-area" id="dropZone">
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
@@ -547,6 +573,15 @@
                         <textarea id="textContent" placeholder="Enter markdown content here..."></textarea>
                     </div>
 
+                    <div class="form-group">
+                        <label for="textAudience">Who should this be visible to?</label>
+                        <select id="textAudience">
+                            <option value="both" selected>Everyone (default)</option>
+                            <option value="pre_join">Pre-joining candidates only</option>
+                            <option value="post_join">Current employees only</option>
+                        </select>
+                    </div>
+
                     <button type="button" class="button" onclick="uploadText()">Add Content</button>
                 </div>
 
@@ -576,6 +611,15 @@
                         actually changed what it answers.
                         <a href="#" onclick="resetChat(); return false;" style="color:#667eea;">Reset conversation</a>
                     </p>
+                    <div class="form-group">
+                        <label for="chatSegment">Preview as</label>
+                        <select id="chatSegment">
+                            <option value="" selected>Auto (bot asks, like a real user)</option>
+                            <option value="pre_join">Pre-joining candidate</option>
+                            <option value="post_join">Current employee</option>
+                            <option value="both">Neither / unknown</option>
+                        </select>
+                    </div>
                     <div class="chat-log" id="chatLog"></div>
                     <form class="chat-input-row" id="chatForm" onsubmit="return sendChatMessage(event);">
                         <input type="text" id="chatInput" placeholder="Ask something an employee might ask..." autocomplete="off">
@@ -842,6 +886,7 @@
             selectedFiles.forEach(file => {
                 formData.append('files', file);
             });
+            formData.append('audience', document.getElementById('uploadAudience').value);
 
             document.getElementById('uploadProgress').style.display = 'block';
             document.getElementById('uploadBtn').disabled = true;
@@ -889,7 +934,8 @@
                     },
                     body: JSON.stringify({
                         title: title,
-                        content: content
+                        content: content,
+                        audience: document.getElementById('textAudience').value
                     })
                 });
 
@@ -947,13 +993,22 @@
                         div.innerHTML = data.documents.map(doc => `
                             <div class="file-item">
                                 <div>
-                                    <div class="file-name">${doc.title} ${doc.active ? '' : '<span style="color:#e74c3c;font-weight:normal;">(inactive)</span>'}</div>
+                                    <div class="file-name">
+                                        ${doc.title} ${doc.active ? '' : '<span style="color:#e74c3c;font-weight:normal;">(inactive)</span>'}
+                                        <span class="audience-badge ${doc.audience}">${audienceLabel(doc.audience)}</span>
+                                    </div>
                                     <div class="file-size">
                                         ${(doc.size / 1024).toFixed(1)} KB &middot;
                                         uploaded by ${doc.uploaded_by} on ${new Date(doc.uploaded_at).toLocaleString()}
                                     </div>
                                 </div>
-                                <div style="display:flex; gap:8px;">
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <select style="width:auto; padding:6px 8px; font-size:13px;"
+                                        onchange="setKnowledgeDocumentAudience(${doc.id}, this.value)">
+                                        <option value="both" ${doc.audience === 'both' ? 'selected' : ''}>Everyone</option>
+                                        <option value="pre_join" ${doc.audience === 'pre_join' ? 'selected' : ''}>Pre-join only</option>
+                                        <option value="post_join" ${doc.audience === 'post_join' ? 'selected' : ''}>Post-join only</option>
+                                    </select>
                                     <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px;"
                                         onclick="toggleKnowledgeDocument(${doc.id}, ${!doc.active})">
                                         ${doc.active ? 'Deactivate' : 'Activate'}
@@ -973,6 +1028,25 @@
                     console.error('Error loading knowledge documents:', error);
                     showAlert('knowledgeAlert', 'Could not load knowledge base documents', 'error');
                 });
+        }
+
+        function audienceLabel(audience) {
+            return { pre_join: 'Pre-join only', post_join: 'Post-join only', both: 'Everyone' }[audience] || audience;
+        }
+
+        function setKnowledgeDocumentAudience(id, audience) {
+            const formData = new FormData();
+            formData.append('audience', audience);
+            authedFetch(`/knowledge/documents/${id}/audience`, { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        loadKnowledgeDocuments();
+                    } else {
+                        showAlert('knowledgeAlert', data.error || 'Could not update audience', 'error');
+                    }
+                })
+                .catch(error => showAlert('knowledgeAlert', 'Error updating audience: ' + error.message, 'error'));
         }
 
         function toggleKnowledgeDocument(id, active) {
@@ -1026,10 +1100,11 @@
             const pending = appendChatBubble('bot', 'Thinking...', true);
 
             try {
+                const segment = document.getElementById('chatSegment').value;
                 const response = await authedFetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message })
+                    body: JSON.stringify({ message, segment })
                 });
                 const data = await response.json();
 

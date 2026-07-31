@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -55,6 +55,8 @@ class KnowledgeDocument(Base):
     uploaded_by = Column(String(100), nullable=False)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     active = Column(Boolean, default=True, nullable=False)
+    # 'pre_join', 'post_join', or 'both' (visible to segments that aren't yet known)
+    audience = Column(String(20), default='both', nullable=False)
 
 class FileUploadManager:
     """Manages file uploads and user authentication"""
@@ -80,9 +82,22 @@ class FileUploadManager:
         # Initialize database
         self.engine = create_engine(f'sqlite:///{db_path}')
         Base.metadata.create_all(self.engine)
+        self._migrate_schema()
         self.Session = sessionmaker(bind=self.engine)
 
         logger.info(f"FileUploadManager initialized: {upload_dir}")
+
+    def _migrate_schema(self):
+        """create_all() only creates missing tables, not missing columns on
+        existing ones — handle columns added after the initial deploy here."""
+        with self.engine.connect() as conn:
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(knowledge_documents)"))]
+            if cols and 'audience' not in cols:
+                conn.execute(text(
+                    "ALTER TABLE knowledge_documents ADD COLUMN audience VARCHAR(20) DEFAULT 'both' NOT NULL"
+                ))
+                conn.commit()
+                logger.info("Migrated knowledge_documents: added audience column (default 'both')")
 
     # User Authentication Methods
     def register_user(self, username: str, email: str, password: str, fullname: str = "") -> Tuple[bool, str]:
@@ -288,14 +303,18 @@ class FileUploadManager:
             session.close()
 
     # Knowledge base document methods
-    def add_knowledge_document(self, title: str, content: str, uploaded_by: str) -> Tuple[bool, str, Optional[int]]:
-        """Add a document that contributes to the bot's knowledge base"""
+    def add_knowledge_document(self, title: str, content: str, uploaded_by: str, audience: str = 'both') -> Tuple[bool, str, Optional[int]]:
+        """Add a document that contributes to the bot's knowledge base.
+        audience: 'pre_join', 'post_join', or 'both' (default)."""
+        if audience not in ('pre_join', 'post_join', 'both'):
+            audience = 'both'
         session = self.Session()
         try:
             doc = KnowledgeDocument(
                 title=title,
                 content=content,
                 uploaded_by=uploaded_by,
+                audience=audience,
             )
             session.add(doc)
             session.commit()
@@ -324,6 +343,7 @@ class FileUploadManager:
                     'uploaded_by': d.uploaded_by,
                     'uploaded_at': d.uploaded_at.isoformat(),
                     'active': d.active,
+                    'audience': d.audience,
                     'size': len(d.content),
                 }
                 for d in docs
@@ -347,6 +367,25 @@ class FileUploadManager:
             return True, "Updated"
         except Exception as e:
             logger.error(f"Error updating knowledge document: {e}")
+            return False, str(e)
+        finally:
+            session.close()
+
+    def set_knowledge_document_audience(self, doc_id: int, audience: str) -> Tuple[bool, str]:
+        """Re-tag a knowledge document's audience ('pre_join'/'post_join'/'both')"""
+        if audience not in ('pre_join', 'post_join', 'both'):
+            return False, "Invalid audience"
+        session = self.Session()
+        try:
+            doc = session.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
+            if not doc:
+                return False, "Document not found"
+            doc.audience = audience
+            session.commit()
+            logger.info(f"Knowledge document {doc_id} audience set to {audience}")
+            return True, "Updated"
+        except Exception as e:
+            logger.error(f"Error updating knowledge document audience: {e}")
             return False, str(e)
         finally:
             session.close()
@@ -417,26 +456,29 @@ class UploadedFileProcessor:
         self.base_file = self.knowledge_dir / "knowledge_base.md"
         self.output_file = self.knowledge_dir / "knowledge.md"
 
-    def rebuild_knowledge_md(self, active_docs: List[Dict]) -> Tuple[bool, str]:
+    def rebuild_knowledge_md(self, active_docs: List[Dict], output_file: Optional[Path] = None) -> Tuple[bool, str]:
         """
-        Regenerate knowledge.md from the curated base file plus active
-        HR-uploaded documents. Overwrites knowledge.md; never touches the base.
+        Regenerate a knowledge file from the curated base file plus a given
+        set of active documents (already filtered by caller, e.g. by
+        audience). Never touches the base file.
 
         Args:
             active_docs: list of dicts with 'title' and 'content' keys
+            output_file: where to write; defaults to self.output_file (knowledge.md)
 
         Returns:
             Tuple of (success, message)
         """
+        output_file = output_file or self.output_file
         try:
             base_content = self.base_file.read_text(encoding='utf-8') if self.base_file.exists() else ""
             sections = [base_content.rstrip()] if base_content.strip() else []
             for doc in active_docs:
                 sections.append(f"## File: {doc['title']}\n\n{doc['content'].strip()}")
             merged = "\n\n---\n\n".join(sections)
-            self.output_file.write_text(merged, encoding='utf-8')
-            logger.info(f"knowledge.md rebuilt: base + {len(active_docs)} uploaded document(s)")
-            return True, f"knowledge.md rebuilt with {len(active_docs)} uploaded document(s)"
+            output_file.write_text(merged, encoding='utf-8')
+            logger.info(f"{output_file.name} rebuilt: base + {len(active_docs)} document(s)")
+            return True, f"{output_file.name} rebuilt with {len(active_docs)} document(s)"
         except Exception as e:
             logger.error(f"Error rebuilding knowledge.md: {e}")
             return False, str(e)

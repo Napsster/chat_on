@@ -55,24 +55,37 @@ DIRECTORY = CandidateDirectory(APP_DIR)
 
 # --- Knowledge base ---------------------------------------------------------
 # knowledge_base.md: curated, git-tracked core (hand-edited, or overwritten by
-#   Google Drive sync if that's ever configured).
-# knowledge.md: generated (gitignored) — base + every active HR-uploaded
-#   document, rebuilt by rebuild_and_reload_knowledge(). This is what the bot
-#   actually loads/embeds.
+#   Google Drive sync if that's ever configured) — shared by every segment.
+# knowledge.md / knowledge_pre_join.md / knowledge_post_join.md: generated
+#   (gitignored), each = base + active HR-uploaded documents tagged for that
+#   audience ('both'-tagged docs land in all three). Rebuilt by
+#   rebuild_and_reload_knowledge(). These are what the bot actually loads/embeds.
 KNOWLEDGE_BASE_FILE = APP_DIR / "knowledge_base.md"
 KNOWLEDGE_FILE = APP_DIR / "knowledge.md"
+KNOWLEDGE_FILE_PRE_JOIN = APP_DIR / "knowledge_pre_join.md"
+KNOWLEDGE_FILE_POST_JOIN = APP_DIR / "knowledge_post_join.md"
 TOP_K = 8
 
 
-def reload_knowledge_base():
-    """(Re)load knowledge.md and rebuild the vector store from its current content."""
-    global KNOWLEDGE_BASE, VSTORE
+def _load_knowledge_file(path: Path) -> str:
     try:
-        KNOWLEDGE_BASE = KNOWLEDGE_FILE.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8")
     except Exception as e:
-        logger.warning(f"Could not load knowledge.md: {e}")
-        KNOWLEDGE_BASE = ""
+        logger.warning(f"Could not load {path.name}: {e}")
+        return ""
+
+
+def reload_knowledge_base():
+    """(Re)load all three knowledge files and rebuild their vector stores."""
+    global KNOWLEDGE_BASE, VSTORE
+    global KNOWLEDGE_BASE_PRE_JOIN, VSTORE_PRE_JOIN
+    global KNOWLEDGE_BASE_POST_JOIN, VSTORE_POST_JOIN
+    KNOWLEDGE_BASE = _load_knowledge_file(KNOWLEDGE_FILE)
     VSTORE = VectorStore(KNOWLEDGE_FILE)
+    KNOWLEDGE_BASE_PRE_JOIN = _load_knowledge_file(KNOWLEDGE_FILE_PRE_JOIN)
+    VSTORE_PRE_JOIN = VectorStore(KNOWLEDGE_FILE_PRE_JOIN)
+    KNOWLEDGE_BASE_POST_JOIN = _load_knowledge_file(KNOWLEDGE_FILE_POST_JOIN)
+    VSTORE_POST_JOIN = VectorStore(KNOWLEDGE_FILE_POST_JOIN)
 
 
 reload_knowledge_base()
@@ -139,9 +152,9 @@ FIRST_MESSAGE_DISCLAIMER = (
     "or compliance record — please confirm anything important with People & Culture._"
 )
 
-PERSONA_RULES = f"""You are Maya, the pre-onboarding assistant for Recykal (legal name \
-Rapidue Technologies Pvt Ltd). You chat with brand-new hires over WhatsApp to welcome \
-them and answer their onboarding questions.
+PERSONA_RULES = f"""You are Maya, the People & Culture assistant for Recykal (legal name \
+Rapidue Technologies Pvt Ltd). You chat with candidates and employees over WhatsApp and \
+answer their questions about joining and working at Recykal.
 
 ################  ABSOLUTE GROUNDING RULE  ################
 You must answer ONLY using facts found in the KNOWLEDGE BASE provided below. This is your \
@@ -175,9 +188,24 @@ peopleandculture@recykal.com, itsupport@recykal.com) rather than a vague "contac
 - Use an emoji only occasionally, when it feels natural.
 
 ################  YOUR GOAL  ################
-Help the new hire feel welcomed and get their onboarding questions answered accurately from \
-the KNOWLEDGE BASE. If they ask something out of scope, gently deflect and steer back to how \
-you can help with onboarding."""
+Help the person you're chatting with feel welcomed and get their questions answered accurately \
+from the KNOWLEDGE BASE. If they ask something out of scope, gently deflect and steer back to \
+how you can help."""
+
+
+SEGMENT_FRAMING = {
+    "pre_join": """################  AUDIENCE: PRE-JOINING CANDIDATE  ################
+You're talking to someone who has accepted an offer but hasn't started yet — this may be \
+their first contact with the company. Focus on pre-joining logistics: documents needed, \
+joining formalities, what to expect on day 1, the onboarding checklist, and offer-related \
+process questions (never specific numbers — those still get deflected). A warm welcome fits \
+naturally here.""",
+    "post_join": """################  AUDIENCE: CURRENT EMPLOYEE  ################
+You're talking to someone who already works at Recykal — do NOT use onboarding/welcome \
+language ("welcome aboard", "excited to have you join"); they're already part of the team. \
+Focus on ongoing-employment topics: leave, benefits, IT support, expense/reimbursement \
+process, and day-to-day policies.""",
+}
 
 
 CANDIDATE_RULES = """################  CANDIDATE PROFILE  ################
@@ -193,8 +221,10 @@ get deflected to People & Culture.
 - For general company policy/benefits/process questions, still answer ONLY from the KNOWLEDGE BASE."""
 
 
-def build_system_prompt(kb_context: str, profile_block: str | None = None) -> str:
+def build_system_prompt(kb_context: str, profile_block: str | None = None, segment: str | None = None) -> str:
     parts = [PERSONA_RULES]
+    if segment in SEGMENT_FRAMING:
+        parts.append(SEGMENT_FRAMING[segment])
     if profile_block:
         parts.append(CANDIDATE_RULES + "\n\n" + profile_block +
                      "\n################  END OF CANDIDATE PROFILE  ################")
@@ -206,13 +236,77 @@ def build_system_prompt(kb_context: str, profile_block: str | None = None) -> st
     return "\n\n".join(parts)
 
 
-def retrieve_context(query: str) -> str:
-    """Top-k relevant chunks via vector memory; full KB as fallback."""
-    if VSTORE.ready:
-        chunks = VSTORE.retrieve(query, k=TOP_K)
+def retrieve_context(query: str, segment: str | None = None) -> str:
+    """Top-k relevant chunks via vector memory; full KB as fallback. segment
+    ('pre_join'/'post_join'/None) picks which knowledge base to search."""
+    if segment == "pre_join":
+        vstore, base = VSTORE_PRE_JOIN, KNOWLEDGE_BASE_PRE_JOIN
+    elif segment == "post_join":
+        vstore, base = VSTORE_POST_JOIN, KNOWLEDGE_BASE_POST_JOIN
+    else:
+        vstore, base = VSTORE, KNOWLEDGE_BASE
+    if vstore.ready:
+        chunks = vstore.retrieve(query, k=TOP_K)
         if chunks:
             return "\n\n---\n\n".join(chunks)
-    return KNOWLEDGE_BASE
+    return base
+
+
+# --- Segment (pre_join / post_join) resolution ------------------------------
+SEGMENT_QUESTION = (
+    "\n\nBtw, are you joining us soon (not started yet) or already part of the "
+    "team? Just let me know so I can tailor my answers!"
+)
+
+_PRE_JOIN_MARKERS = (
+    "not started", "not yet", "haven't started", "havent started", "yet to join",
+    "about to join", "joining soon", "new joinee", "new joiner", "not joined",
+    "haven't joined", "havent joined", "yet to start", "starting soon",
+    "will join", "going to join", "offer accepted", "accepted the offer",
+    "not an employee", "candidate", "new hire",
+)
+_POST_JOIN_MARKERS = (
+    "already joined", "already working", "already work", "already part",
+    "current employee", "currently employed", "i work", "i'm working",
+    "im working", "already here", "existing employee", "already an employee",
+    "work here", "working here", "been here", "on the team", "part of the team",
+    "employee here", "already employed", "current staff", "already a part",
+)
+
+
+def parse_segment_reply(text: str) -> str | None:
+    """Best-effort parse of a free-text answer to SEGMENT_QUESTION. None if unclear."""
+    t = (text or "").lower()
+    if any(m in t for m in _PRE_JOIN_MARKERS):
+        return "pre_join"
+    if any(m in t for m in _POST_JOIN_MARKERS):
+        return "post_join"
+    return None
+
+
+def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: str) -> tuple[str | None, bool]:
+    """Returns (segment, should_ask). Mutates user_data in place (segment /
+    segment_asked) — caller just needs to save_user_data afterward.
+
+    Priority: candidate directory signal > previously stored answer > ask once
+    (parsing the next message as the answer) > give up, stay unsegmented."""
+    directory_segment = DIRECTORY.segment_of(candidate) if candidate else None
+    if directory_segment:
+        user_data["segment"] = directory_segment
+        return directory_segment, False
+
+    stored = user_data.get("segment")
+    if stored:
+        return stored, False
+
+    if user_data.get("segment_asked"):
+        parsed = parse_segment_reply(incoming_message)
+        if parsed:
+            user_data["segment"] = parsed
+        return parsed, False
+
+    user_data["segment_asked"] = True
+    return None, True
 
 
 def get_user_data(phone: str) -> dict:
@@ -271,9 +365,9 @@ def save_media(phone: str, media: list[dict]) -> list[dict]:
     return saved
 
 
-def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None) -> str:
+def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> str:
     """Call DeepSeek with retrieved KB context + candidate profile + recent history."""
-    messages = [{"role": "system", "content": build_system_prompt(kb_context, profile_block)}]
+    messages = [{"role": "system", "content": build_system_prompt(kb_context, profile_block, segment)}]
     messages.extend(user_data["history"][-MAX_HISTORY:])
     try:
         resp = requests.post(
@@ -328,10 +422,14 @@ async def whatsapp_webhook(request: Request):
             full = DIRECTORY.name_of(candidate)
             first_name = full.split()[0] if full else None
 
+        segment, should_ask_segment = resolve_segment(candidate, user_data, incoming_message)
+
         # Genuine empty ping (no text AND no attachment) → greeting.
         if not incoming_message and not media:
             hello = f"Hey {first_name}! 👋" if first_name else "Hey! 👋"
             reply = f"{hello} I'm Maya from Recykal's People & Culture team. How can I help with your onboarding today?"
+            if should_ask_segment:
+                reply += SEGMENT_QUESTION
             if is_first_interaction:
                 reply += FIRST_MESSAGE_DISCLAIMER
             user_data["history"].append({"role": "assistant", "content": reply})
@@ -370,9 +468,11 @@ async def whatsapp_webhook(request: Request):
             user_turn = incoming_message
             retrieval_query = f"{prev_user} {incoming_message}".strip()
 
-        kb_context = retrieve_context(retrieval_query)
+        kb_context = retrieve_context(retrieval_query, segment)
         user_data["history"].append({"role": "user", "content": user_turn})
-        reply = generate_reply(user_data, kb_context, profile_block)
+        reply = generate_reply(user_data, kb_context, profile_block, segment)
+        if should_ask_segment:
+            reply += SEGMENT_QUESTION
         if is_first_interaction:
             reply += FIRST_MESSAGE_DISCLAIMER
         user_data["history"].append({"role": "assistant", "content": reply})
@@ -408,21 +508,37 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         user_data = get_user_data(session_key)
         is_first_interaction = not user_data["history"]
 
+        # Optional explicit override so HR can preview either segment's
+        # experience directly, instead of going through the ask-once flow.
+        override = data.get("segment")
+        if override in ("pre_join", "post_join"):
+            user_data["segment"] = override
+            user_data["segment_asked"] = True
+            segment, should_ask_segment = override, False
+        elif override == "both":
+            user_data["segment"] = None
+            user_data["segment_asked"] = True
+            segment, should_ask_segment = None, False
+        else:
+            segment, should_ask_segment = resolve_segment(None, user_data, message)
+
         prev_user = next(
             (m["content"] for m in reversed(user_data["history"]) if m["role"] == "user"),
             "",
         )
         retrieval_query = f"{prev_user} {message}".strip()
-        kb_context = retrieve_context(retrieval_query)
+        kb_context = retrieve_context(retrieval_query, segment)
 
         user_data["history"].append({"role": "user", "content": message})
-        reply = generate_reply(user_data, kb_context, profile_block=None)
+        reply = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
+        if should_ask_segment:
+            reply += SEGMENT_QUESTION
         if is_first_interaction:
             reply += FIRST_MESSAGE_DISCLAIMER
         user_data["history"].append({"role": "assistant", "content": reply})
         save_user_data(session_key, user_data)
 
-        return JSONResponse({"reply": reply})
+        return JSONResponse({"reply": reply, "segment": segment})
 
     except Exception as e:
         logger.error(f"Chat error: {e}")
@@ -455,14 +571,24 @@ KNOWLEDGE_MERGEABLE_EXTENSIONS = {'.md', '.txt'}
 
 
 def rebuild_and_reload_knowledge():
-    """Regenerate knowledge.md from knowledge_base.md + active HR-uploaded
-    documents, then reload it into the running vector store."""
-    active_docs = upload_manager.list_knowledge_documents(active_only=True)
-    success, message = file_processor.rebuild_knowledge_md(active_docs)
-    if success:
+    """Regenerate all three knowledge files from knowledge_base.md + active
+    HR-uploaded documents, filtered by audience tag, then reload them into
+    their vector stores. knowledge.md (segment unknown) only gets 'both'-tagged
+    docs; the pre/post-join files get their tag plus every 'both'-tagged doc."""
+    all_active = upload_manager.list_knowledge_documents(active_only=True)
+    common_docs = [d for d in all_active if d.get('audience', 'both') == 'both']
+    pre_join_docs = [d for d in all_active if d.get('audience') in ('pre_join', 'both')]
+    post_join_docs = [d for d in all_active if d.get('audience') in ('post_join', 'both')]
+
+    results = [
+        file_processor.rebuild_knowledge_md(common_docs, output_file=KNOWLEDGE_FILE),
+        file_processor.rebuild_knowledge_md(pre_join_docs, output_file=KNOWLEDGE_FILE_PRE_JOIN),
+        file_processor.rebuild_knowledge_md(post_join_docs, output_file=KNOWLEDGE_FILE_POST_JOIN),
+    ]
+    if all(ok for ok, _ in results):
         reload_knowledge_base()
     else:
-        logger.error(f"Could not rebuild knowledge.md: {message}")
+        logger.error(f"Could not rebuild knowledge files: {[msg for ok, msg in results if not ok]}")
 
 
 @app.get("/upload-interface")
@@ -548,10 +674,14 @@ async def login(
 @app.post("/upload")
 async def upload_files(
     request: Request,
+    audience: str = Form('both'),
     current_user: dict = Depends(get_current_user)
 ):
-    """Upload files to the chatbot"""
+    """Upload files to the chatbot. audience: 'pre_join'/'post_join'/'both' —
+    which segment(s) of users these files' content should be visible to."""
     username = current_user["username"]
+    if audience not in ('pre_join', 'post_join', 'both'):
+        audience = 'both'
     try:
         form = await request.form()
 
@@ -593,7 +723,7 @@ async def upload_files(
                     try:
                         text = content.decode('utf-8')
                         ok, kmsg, _ = upload_manager.add_knowledge_document(
-                            title=file.filename, content=text, uploaded_by=username
+                            title=file.filename, content=text, uploaded_by=username, audience=audience
                         )
                         if ok:
                             added_to_knowledge = True
@@ -640,6 +770,7 @@ async def upload_text(request: Request, current_user: dict = Depends(get_current
         username = current_user["username"]
         title = data.get('title')
         content = data.get('content')
+        audience = data.get('audience') if data.get('audience') in ('pre_join', 'post_join', 'both') else 'both'
 
         if not all([title, content]):
             return JSONResponse(
@@ -655,7 +786,7 @@ async def upload_text(request: Request, current_user: dict = Depends(get_current
 
         if success:
             ok, kmsg, _ = upload_manager.add_knowledge_document(
-                title=title, content=content, uploaded_by=username
+                title=title, content=content, uploaded_by=username, audience=audience
             )
             if ok:
                 rebuild_and_reload_knowledge()
@@ -726,6 +857,20 @@ async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), curre
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/knowledge/documents/{doc_id}/audience")
+async def set_knowledge_document_audience(doc_id: int, audience: str = Form(...), current_user: dict = Depends(get_current_user)):
+    """Re-tag which segment(s) a knowledge document is visible to"""
+    try:
+        success, message = upload_manager.set_knowledge_document_audience(doc_id, audience)
+        if not success:
+            return JSONResponse({"success": False, "error": message}, status_code=400)
+        rebuild_and_reload_knowledge()
+        return JSONResponse({"success": True, "audience": audience})
+    except Exception as e:
+        logger.error(f"Set knowledge document audience error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.delete("/knowledge/documents/{doc_id}")
 async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(get_current_user)):
     """Permanently remove a knowledge document"""
@@ -754,6 +899,8 @@ async def health():
         "knowledge_chars": len(KNOWLEDGE_BASE),
         "vector_memory": VSTORE.ready,
         "vector_chunks": len(VSTORE.chunks),
+        "vector_chunks_pre_join": len(VSTORE_PRE_JOIN.chunks),
+        "vector_chunks_post_join": len(VSTORE_POST_JOIN.chunks),
         "retrieval_top_k": TOP_K,
         "candidate_directory": DIRECTORY.ready,
         "candidate_rows": len(DIRECTORY._index),

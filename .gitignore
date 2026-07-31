@@ -51,9 +51,12 @@ data/service_account.json
 # Vector embeddings cache (regenerated from knowledge.md on startup)
 *.vec.npz
 
-# knowledge.md is generated (knowledge_base.md + active HR-uploaded documents
-# from the knowledge_documents DB table) — knowledge_base.md is the tracked file
+# knowledge.md / knowledge_pre_join.md / knowledge_post_join.md are generated
+# (knowledge_base.md + active, audience-tagged HR-uploaded documents from the
+# knowledge_documents DB table) — knowledge_base.md is the tracked file
 knowledge.md
+knowledge_pre_join.md
+knowledge_post_join.md
 .google_drive_sync_cache.json
 
 # Logs
