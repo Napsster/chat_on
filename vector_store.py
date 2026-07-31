@@ -63,11 +63,19 @@ def _chunk_markdown(text: str) -> list[str]:
 _SHARED_MODEL = None
 
 
+# onnxruntime's default thread pool and batch size scale their memory use with
+# both threads and input size — on a small VPS a big knowledge-base rebuild
+# (hundreds of chunks in one call) can spike well past what a single small
+# request needs. threads=1 and a small EMBED_BATCH_SIZE bound peak memory
+# regardless of corpus size, at the cost of a somewhat slower rebuild.
+EMBED_BATCH_SIZE = 16
+
+
 def _shared_model_lazy():
     global _SHARED_MODEL
     if _SHARED_MODEL is None:
         from fastembed import TextEmbedding
-        _SHARED_MODEL = TextEmbedding(EMBED_MODEL)
+        _SHARED_MODEL = TextEmbedding(EMBED_MODEL, threads=1)
     return _SHARED_MODEL
 
 
@@ -93,7 +101,10 @@ class VectorStore:
         return _shared_model_lazy()
 
     def _embed(self, texts: list[str]) -> np.ndarray:
-        vecs = np.array(list(self._model_lazy().embed(texts)), dtype=np.float32)
+        vecs = np.array(
+            list(self._model_lazy().embed(texts, batch_size=EMBED_BATCH_SIZE)),
+            dtype=np.float32,
+        )
         # L2-normalize so cosine similarity == dot product
         norms = np.linalg.norm(vecs, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
