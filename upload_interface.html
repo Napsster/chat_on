@@ -523,6 +523,7 @@
                     <button class="tab-button" onclick="switchTab('history')">📋 Upload History</button>
                     <button class="tab-button" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
                     <button class="tab-button" onclick="switchTab('chat')">💬 Try the Bot</button>
+                    <button class="tab-button" onclick="switchTab('outreach')">📣 Outreach</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -628,6 +629,35 @@
                         <input type="text" id="chatInput" placeholder="Ask something an employee might ask..." autocomplete="off">
                         <button type="submit" class="button">Send</button>
                     </form>
+                </div>
+
+                <!-- Outreach Tab -->
+                <div id="outreachTab" class="tab-content">
+                    <div id="outreachAlert"></div>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Reach out to candidates from the onboarding log. A <strong>welcome
+                        message</strong> uses an approved WhatsApp template, so it reaches
+                        someone even if they've never messaged the bot. A free-form
+                        <strong>update</strong> only reaches candidates who messaged within
+                        the last 24 hours — that's a WhatsApp rule, not something this page
+                        can work around.
+                    </p>
+                    <div id="outreachEmpty" style="display:none; text-align:center; color:#999; padding:20px;"></div>
+                    <div id="outreachContent" style="display:none;">
+                        <div id="candidateList" style="margin-bottom: 15px;"></div>
+
+                        <div class="form-group">
+                            <label for="updateMessage">Update message (for the selected candidates who've already messaged)</label>
+                            <textarea id="updateMessage" placeholder="e.g., Heads up — the leave policy was just updated, check with People & Culture for details."></textarea>
+                        </div>
+
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button type="button" class="button" id="sendWelcomeBtn" style="width:auto;" onclick="sendWelcomeToSelected()">Send Welcome to Selected</button>
+                            <button type="button" class="button secondary" id="sendUpdateBtn" style="width:auto;" onclick="sendUpdateToSelected()">Send Update to Selected</button>
+                        </div>
+
+                        <div id="outreachResults" style="margin-top: 15px;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -875,6 +905,9 @@
 
             if (tab === 'chat') {
                 document.getElementById('chatInput').focus();
+            }
+            if (tab === 'outreach') {
+                loadCandidates();
             }
         }
 
@@ -1147,6 +1180,140 @@
                 showAlert('chatAlert', 'Conversation reset', 'info');
             } catch (error) {
                 showAlert('chatAlert', 'Error resetting conversation: ' + error.message, 'error');
+            }
+        }
+
+        // Outreach functions
+        function loadCandidates() {
+            authedFetch('/candidates')
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.configured) {
+                        document.getElementById('outreachEmpty').style.display = 'block';
+                        document.getElementById('outreachEmpty').innerHTML =
+                            'No onboarding log is configured yet — see .env.example ' +
+                            '(ONBOARDING_SHEET_ID / ONBOARDING_SHEET_CSV / ONBOARDING_SHEET_FILE) ' +
+                            'for how to point this at a real candidate list.';
+                        document.getElementById('outreachContent').style.display = 'none';
+                        return;
+                    }
+
+                    document.getElementById('outreachEmpty').style.display = 'none';
+                    document.getElementById('outreachContent').style.display = 'block';
+
+                    if (!data.welcome_template_configured) {
+                        showAlert('outreachAlert',
+                            'No WhatsApp welcome template configured yet (TWILIO_WELCOME_TEMPLATE_SID) — ' +
+                            'welcome sends will fail until one is approved and set. Updates to already-engaged ' +
+                            'candidates will still work.', 'info');
+                    }
+
+                    const list = document.getElementById('candidateList');
+                    if (data.candidates.length === 0) {
+                        list.innerHTML = '<p style="color:#999; text-align:center;">No candidates found in the onboarding log.</p>';
+                        return;
+                    }
+
+                    list.innerHTML = data.candidates.map(c => `
+                        <div class="file-item">
+                            <div style="display:flex; align-items:center; gap:12px;">
+                                <input type="checkbox" class="candidate-checkbox" value="${c.phone_raw}" style="width:auto;">
+                                <div>
+                                    <div class="file-name">
+                                        ${c.name || '(no name)'}
+                                        <span class="audience-badge ${c.has_messaged ? 'post_join' : 'both'}">
+                                            ${c.has_messaged ? 'Has messaged' : 'Never messaged'}
+                                        </span>
+                                    </div>
+                                    <div class="file-size">${c.phone_raw}${c.segment ? ' &middot; ' + c.segment.replace('_', '-') : ''}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                })
+                .catch(error => {
+                    console.error('Error loading candidates:', error);
+                    showAlert('outreachAlert', 'Could not load candidates', 'error');
+                });
+        }
+
+        function getSelectedPhones() {
+            return Array.from(document.querySelectorAll('.candidate-checkbox:checked')).map(el => el.value);
+        }
+
+        function renderOutreachResults(results) {
+            const div = document.getElementById('outreachResults');
+            div.innerHTML = results.map(r => `
+                <div style="padding:8px 0; border-bottom:1px solid #f0f0f0; font-size:13px;">
+                    <strong>${r.phone}</strong>:
+                    <span style="color:${r.success ? '#166534' : '#e74c3c'};">${r.success ? 'Sent' : 'Failed'}</span>
+                    — ${r.detail}
+                </div>
+            `).join('');
+        }
+
+        async function sendWelcomeToSelected() {
+            const phones = getSelectedPhones();
+            if (phones.length === 0) {
+                showAlert('outreachAlert', 'Select at least one candidate first', 'error');
+                return;
+            }
+            const btn = document.getElementById('sendWelcomeBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            try {
+                const response = await authedFetch('/candidates/send-welcome', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phones })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    renderOutreachResults(data.results);
+                    showAlert('outreachAlert', 'Welcome messages processed — see results below', 'success');
+                } else {
+                    showAlert('outreachAlert', data.error || 'Send failed', 'error');
+                }
+            } catch (error) {
+                showAlert('outreachAlert', 'Error sending: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send Welcome to Selected';
+            }
+        }
+
+        async function sendUpdateToSelected() {
+            const phones = getSelectedPhones();
+            const message = document.getElementById('updateMessage').value.trim();
+            if (phones.length === 0) {
+                showAlert('outreachAlert', 'Select at least one candidate first', 'error');
+                return;
+            }
+            if (!message) {
+                showAlert('outreachAlert', 'Write an update message first', 'error');
+                return;
+            }
+            const btn = document.getElementById('sendUpdateBtn');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            try {
+                const response = await authedFetch('/candidates/send-update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phones, message })
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    renderOutreachResults(data.results);
+                    showAlert('outreachAlert', 'Updates processed — see results below', 'success');
+                } else {
+                    showAlert('outreachAlert', data.error || 'Send failed', 'error');
+                }
+            } catch (error) {
+                showAlert('outreachAlert', 'Error sending: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Send Update to Selected';
             }
         }
 

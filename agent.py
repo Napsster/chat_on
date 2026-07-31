@@ -21,8 +21,10 @@ from fastapi import FastAPI, Request, Form, Depends
 from fastapi.responses import Response, JSONResponse, FileResponse
 from twilio.twiml.messaging_response import MessagingResponse
 
+from twilio.rest import Client as TwilioClient
+
 from vector_store import VectorStore
-from lookup_store import CandidateDirectory
+from lookup_store import CandidateDirectory, normalize_phone
 from google_drive_sync import GoogleDriveSync
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
 from auth import init_auth, create_token, get_current_user
@@ -325,6 +327,65 @@ def save_user_data(phone: str, data: dict):
 # --- Media (document upload) handling, WhatsApp side -----------------------
 TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+
+# --- Outbound WhatsApp (HR-initiated welcome/update messages) --------------
+# Dormant unless all three are set. TWILIO_WELCOME_TEMPLATE_SID is a WhatsApp
+# message template approved via Twilio/Meta — required to message someone
+# who hasn't messaged the bot in the last 24h (WhatsApp's session-window
+# rule; not something this code can work around). Free-form sends only work
+# for people inside that 24h window, template or not.
+TWILIO_WHATSAPP_FROM = os.environ.get("TWILIO_WHATSAPP_NUMBER") or os.environ.get("TWILIO_PHONE_NUMBER", "")
+TWILIO_WELCOME_TEMPLATE_SID = os.environ.get("TWILIO_WELCOME_TEMPLATE_SID", "")
+
+_twilio_client = None
+
+
+def get_twilio_client():
+    global _twilio_client
+    if _twilio_client is None and TWILIO_SID and TWILIO_TOKEN:
+        _twilio_client = TwilioClient(TWILIO_SID, TWILIO_TOKEN)
+    return _twilio_client
+
+
+def send_whatsapp_template(to_phone: str, content_variables: dict | None = None) -> tuple[bool, str]:
+    """Send the approved welcome template — works even if the recipient has
+    never messaged the bot before (exempt from the 24h window)."""
+    client = get_twilio_client()
+    if not client:
+        return False, "Twilio not configured (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN missing)"
+    if not TWILIO_WELCOME_TEMPLATE_SID:
+        return False, "No welcome template configured (set TWILIO_WELCOME_TEMPLATE_SID once one is approved)"
+    if not TWILIO_WHATSAPP_FROM:
+        return False, "No Twilio WhatsApp sender number configured (TWILIO_WHATSAPP_NUMBER/TWILIO_PHONE_NUMBER)"
+    try:
+        msg = client.messages.create(
+            from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+            to=f"whatsapp:{to_phone}",
+            content_sid=TWILIO_WELCOME_TEMPLATE_SID,
+            content_variables=json.dumps(content_variables or {}),
+        )
+        return True, msg.sid
+    except Exception as e:
+        return False, str(e)
+
+
+def send_whatsapp_freeform(to_phone: str, body: str) -> tuple[bool, str]:
+    """Send a plain message — only deliverable if the recipient messaged the
+    bot within the last 24h; Twilio will reject it otherwise."""
+    client = get_twilio_client()
+    if not client:
+        return False, "Twilio not configured (TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN missing)"
+    if not TWILIO_WHATSAPP_FROM:
+        return False, "No Twilio WhatsApp sender number configured (TWILIO_WHATSAPP_NUMBER/TWILIO_PHONE_NUMBER)"
+    try:
+        msg = client.messages.create(
+            from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+            to=f"whatsapp:{to_phone}",
+            body=body,
+        )
+        return True, msg.sid
+    except Exception as e:
+        return False, str(e)
 
 
 def parse_media(form) -> list[dict]:
@@ -886,6 +947,100 @@ async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(ge
 
 
 # ============================================================================
+# OUTREACH (HR-initiated welcome/update messages)
+# ============================================================================
+
+@app.get("/candidates")
+async def list_candidates(current_user: dict = Depends(get_current_user)):
+    """List candidates from the onboarding log (if one is configured), each
+    flagged with whether they've ever messaged the bot — a rough signal for
+    whether a free-form update would actually be deliverable (WhatsApp only
+    allows free-form sends within 24h of the recipient's last message)."""
+    try:
+        if not DIRECTORY.ready:
+            return JSONResponse({
+                "success": True,
+                "configured": False,
+                "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
+                "candidates": [],
+            })
+
+        messaged_phones = {normalize_phone(f.stem) for f in DATA_DIR.glob("*.json")}
+
+        candidates = []
+        for entry in DIRECTORY.list_all():
+            row = entry["row"]
+            candidates.append({
+                "phone_normalized": entry["phone_normalized"],
+                "phone_raw": entry["phone_raw"],
+                "name": DIRECTORY.name_of(row),
+                "segment": DIRECTORY.segment_of(row),
+                "has_messaged": entry["phone_normalized"] in messaged_phones,
+            })
+
+        return JSONResponse({
+            "success": True,
+            "configured": True,
+            "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
+            "candidates": candidates,
+        })
+    except Exception as e:
+        logger.error(f"List candidates error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/candidates/send-welcome")
+async def send_welcome_messages(request: Request, current_user: dict = Depends(get_current_user)):
+    """Bulk-send the approved welcome template. Works regardless of the 24h
+    window — that's the point of using a template. content_variables sends
+    {"1": first_name} to match the template's first placeholder; adjust to
+    match however the actual approved template numbers its variables."""
+    try:
+        data = await request.json()
+        phones = data.get("phones") or []
+        if not phones:
+            return JSONResponse({"error": "No phone numbers provided"}, status_code=400)
+
+        results = []
+        for phone in phones:
+            candidate = DIRECTORY.lookup(phone)
+            name = DIRECTORY.name_of(candidate) if candidate else None
+            first_name = name.split()[0] if name else "there"
+            ok, detail = send_whatsapp_template(phone, {"1": first_name})
+            results.append({"phone": phone, "success": ok, "detail": detail})
+            logger.info(f"Welcome send to {phone} by {current_user['username']}: {ok} ({detail})")
+
+        return JSONResponse({"success": True, "results": results})
+    except Exception as e:
+        logger.error(f"Send welcome error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/candidates/send-update")
+async def send_update_messages(request: Request, current_user: dict = Depends(get_current_user)):
+    """Bulk-send a free-form update. Only actually reaches people who
+    messaged the bot within the last 24h — WhatsApp rejects free-form sends
+    outside that window regardless of what this code does."""
+    try:
+        data = await request.json()
+        phones = data.get("phones") or []
+        message = (data.get("message") or "").strip()
+        if not phones or not message:
+            return JSONResponse({"error": "phones and message are required"}, status_code=400)
+
+        results = []
+        for phone in phones:
+            ok, detail = send_whatsapp_freeform(phone, message)
+            results.append({"phone": phone, "success": ok, "detail": detail})
+            logger.info(f"Update send to {phone} by {current_user['username']}: {ok} ({detail})")
+
+        return JSONResponse({"success": True, "results": results})
+    except Exception as e:
+        logger.error(f"Send update error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ============================================================================
 # STATUS / HEALTH / ROOT
 # ============================================================================
 
@@ -905,6 +1060,11 @@ async def health():
         "candidate_directory": DIRECTORY.ready,
         "candidate_rows": len(DIRECTORY._index),
         "directory_source": DIRECTORY.source,
+        "outreach": {
+            "twilio_configured": bool(get_twilio_client()),
+            "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
+            "sender_configured": bool(TWILIO_WHATSAPP_FROM),
+        },
         "google_drive_sync": DRIVE_SYNC.get_sync_status(),
         "upload_dir_exists": Path(f"{PROJECT_DIR}/uploads").exists(),
         "db_initialized": Path(f"{PROJECT_DIR}/chatbot.db").exists(),

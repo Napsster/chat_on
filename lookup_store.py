@@ -165,6 +165,19 @@ class CandidateDirectory:
             return None
         return self._index.get(normalize_phone(phone))
 
+    def list_all(self) -> list[dict]:
+        """Every indexed candidate row, each tagged with its normalized
+        phone (10-digit, for matching) and raw phone (as entered in the
+        sheet, for actually sending a message — may or may not include a
+        country code depending on how the sheet was filled in)."""
+        self._load()
+        if not self.ready:
+            return []
+        return [
+            {"phone_normalized": key, "phone_raw": row.get(self._phone_col, ""), "row": row}
+            for key, row in self._index.items()
+        ]
+
     def name_of(self, row: dict) -> str | None:
         if row and self._name_col:
             return (row.get(self._name_col) or "").strip() or None
