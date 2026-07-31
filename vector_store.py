@@ -55,6 +55,22 @@ def _chunk_markdown(text: str) -> list[str]:
     return [c for c in chunks if len(c) > 20]
 
 
+# Shared across all VectorStore instances/rebuilds — loading the ONNX model is
+# expensive (100MB+), and knowledge.md gets rebuilt at runtime now (HR uploads),
+# not just once at startup. Without this, every rebuild would momentarily hold
+# two full copies of the model in memory (the old instance, not yet garbage
+# collected, plus the new one loading) — enough to trip an OOM kill on a small VPS.
+_SHARED_MODEL = None
+
+
+def _shared_model_lazy():
+    global _SHARED_MODEL
+    if _SHARED_MODEL is None:
+        from fastembed import TextEmbedding
+        _SHARED_MODEL = TextEmbedding(EMBED_MODEL)
+    return _SHARED_MODEL
+
+
 class VectorStore:
     def __init__(self, knowledge_path: Path, cache_path: Path | None = None):
         self.knowledge_path = Path(knowledge_path)
@@ -63,7 +79,6 @@ class VectorStore:
         self.ready = False
         self.chunks: list[str] = []
         self.vectors: np.ndarray | None = None
-        self._model = None
         try:
             self._build_or_load()
             self.ready = True
@@ -75,10 +90,7 @@ class VectorStore:
         return f"{h}:{MAX_CHARS}:{EMBED_MODEL}"
 
     def _model_lazy(self):
-        if self._model is None:
-            from fastembed import TextEmbedding
-            self._model = TextEmbedding(EMBED_MODEL)
-        return self._model
+        return _shared_model_lazy()
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         vecs = np.array(list(self._model_lazy().embed(texts)), dtype=np.float32)
