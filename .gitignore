@@ -38,9 +38,17 @@ wheels/
 uploads/*
 !uploads/.gitkeep
 
-# Knowledge base
-knowledge.md
-knowledge.vec.npz
+# WhatsApp user data (PII) and downloaded media — never commit
+data/users/*
+!data/users/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Onboarding candidate log (may contain PII) and service account key
+data/onboarding_log.csv
+data/service_account.json
+
+# Vector embeddings cache (regenerated from knowledge.md on startup)
 *.vec.npz
 
 # Logs

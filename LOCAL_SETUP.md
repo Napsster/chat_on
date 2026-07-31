@@ -104,17 +104,25 @@ systemctl status onboarding-agent
 
 ```
 chatbot-local/
-├── agent.py                    # Main FastAPI application
-├── file_upload_handler.py      # File upload & user auth logic
-├── upload_interface.html       # Web UI for uploads
+├── agent.py                    # Main FastAPI application (WhatsApp bot + upload interface)
+├── vector_store.py             # RAG: chunks + embeds knowledge.md, cosine retrieval
+├── lookup_store.py             # Candidate directory (onboarding log) lookup by phone
+├── file_upload_handler.py      # File upload & user auth logic (SQLite-backed)
+├── knowledge.md                # Knowledge base the WhatsApp bot answers from
+├── upload_interface.html       # Web UI for HR to upload/manage knowledge docs
 ├── index.html                  # HTML mockup (from initial task)
 ├── requirements.txt            # Python dependencies
-├── .env.example               # Example environment variables
-├── venv/                      # Virtual environment (created after setup)
-├── uploads/                   # User uploads directory
-├── knowledge/                 # Knowledge base files
-└── chatbot.db                # SQLite database (created on first run)
+├── .env.example                # Example environment variables
+├── venv/                       # Virtual environment (created after setup)
+├── uploads/                    # HR-uploaded knowledge documents
+├── data/users/                 # Per-phone WhatsApp conversation state (gitignored, PII)
+├── data/uploads/               # Documents received over WhatsApp (gitignored, PII)
+└── chatbot.db                  # SQLite database (created on first run)
 ```
+
+This is the same codebase deployed to Hostinger (`/home/chetan/apps/onboarding-agent`,
+service `onboarding-agent`) — keep local, GitHub, and Hostinger in sync via the
+push/pull workflow below.
 
 ---
 
