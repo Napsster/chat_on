@@ -14,7 +14,7 @@ import time
 import logging
 import mimetypes
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 from fastapi import FastAPI, Request, Form, Depends
@@ -324,6 +324,29 @@ def save_user_data(phone: str, data: dict):
         json.dump(data, f, indent=2)
 
 
+DISCLAIMER_REPEAT_AFTER = timedelta(hours=24)
+
+
+def should_show_disclaimer(user_data: dict) -> bool:
+    """True on the very first message ever, or if it's been 24h+ since the
+    last one — reminds a returning user this isn't an official/compliance
+    channel, same as they'd have seen when they first started chatting."""
+    if not user_data["history"]:
+        return True
+    last_at = user_data.get("last_message_at")
+    if not last_at:
+        return True  # no timestamp on record (e.g. an older session) — err on showing it
+    try:
+        elapsed = datetime.now(timezone.utc) - datetime.fromisoformat(last_at)
+        return elapsed > DISCLAIMER_REPEAT_AFTER
+    except Exception:
+        return True
+
+
+def touch_last_message(user_data: dict):
+    user_data["last_message_at"] = datetime.now(timezone.utc).isoformat()
+
+
 # --- Media (document upload) handling, WhatsApp side -----------------------
 TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
@@ -473,7 +496,7 @@ async def whatsapp_webhook(request: Request):
         sync_knowledge_from_drive()
 
         user_data = get_user_data(phone)
-        is_first_interaction = not user_data["history"]
+        show_disclaimer = should_show_disclaimer(user_data)
 
         # Match the caller against the onboarding log (if configured).
         candidate = DIRECTORY.lookup(phone)
@@ -491,9 +514,10 @@ async def whatsapp_webhook(request: Request):
             reply = f"{hello} I'm Maya from Recykal's People & Culture team. How can I help with your onboarding today?"
             if should_ask_segment:
                 reply += SEGMENT_QUESTION
-            if is_first_interaction:
+            if show_disclaimer:
                 reply += FIRST_MESSAGE_DISCLAIMER
             user_data["history"].append({"role": "assistant", "content": reply})
+            touch_last_message(user_data)
             save_user_data(phone, user_data)
             resp = MessagingResponse()
             resp.message(reply)
@@ -534,9 +558,10 @@ async def whatsapp_webhook(request: Request):
         reply = generate_reply(user_data, kb_context, profile_block, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
-        if is_first_interaction:
+        if show_disclaimer:
             reply += FIRST_MESSAGE_DISCLAIMER
         user_data["history"].append({"role": "assistant", "content": reply})
+        touch_last_message(user_data)
         save_user_data(phone, user_data)
 
         resp = MessagingResponse()
@@ -567,7 +592,7 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
 
         session_key = f"web-{current_user['username']}"
         user_data = get_user_data(session_key)
-        is_first_interaction = not user_data["history"]
+        show_disclaimer = should_show_disclaimer(user_data)
 
         # Optional explicit override so HR can preview either segment's
         # experience directly, instead of going through the ask-once flow.
@@ -594,9 +619,10 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         reply = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
-        if is_first_interaction:
+        if show_disclaimer:
             reply += FIRST_MESSAGE_DISCLAIMER
         user_data["history"].append({"role": "assistant", "content": reply})
+        touch_last_message(user_data)
         save_user_data(session_key, user_data)
 
         return JSONResponse({"reply": reply, "segment": segment})
