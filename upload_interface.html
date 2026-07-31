@@ -518,12 +518,13 @@
 
                 <!-- Tabs -->
                 <div class="tabs">
-                    <button class="tab-button active" onclick="switchTab('upload')">📤 Upload Files</button>
-                    <button class="tab-button" onclick="switchTab('text')">📝 Add Text Content</button>
-                    <button class="tab-button" onclick="switchTab('history')">📋 Upload History</button>
-                    <button class="tab-button" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
-                    <button class="tab-button" onclick="switchTab('chat')">💬 Try the Bot</button>
-                    <button class="tab-button" onclick="switchTab('outreach')">📣 Outreach</button>
+                    <button class="tab-button active staff-only-tab" data-tab="upload" onclick="switchTab('upload')">📤 Upload Files</button>
+                    <button class="tab-button staff-only-tab" data-tab="text" onclick="switchTab('text')">📝 Add Text Content</button>
+                    <button class="tab-button staff-only-tab" data-tab="history" onclick="switchTab('history')">📋 Upload History</button>
+                    <button class="tab-button staff-only-tab" data-tab="knowledge" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
+                    <button class="tab-button" data-tab="chat" onclick="switchTab('chat')">💬 Try the Bot</button>
+                    <button class="tab-button staff-only-tab" data-tab="outreach" onclick="switchTab('outreach')">📣 Outreach</button>
+                    <button class="tab-button staff-only-tab" data-tab="pilots" onclick="switchTab('pilots')">🧪 Pilot Users</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -659,6 +660,32 @@
                         <div id="outreachResults" style="margin-top: 15px;"></div>
                     </div>
                 </div>
+
+                <!-- Pilot Users Tab -->
+                <div id="pilotsTab" class="tab-content">
+                    <div id="pilotsAlert"></div>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Chat-only accounts for real employees/candidates trying the bot.
+                        Pilot accounts can only use the "Try the Bot" tab — no knowledge-base
+                        edit access, no outreach. Share the username/password with them directly.
+                    </p>
+
+                    <div class="form-group">
+                        <label for="pilotFullname">Full name</label>
+                        <input type="text" id="pilotFullname" placeholder="e.g., Priya Sharma">
+                    </div>
+                    <div class="form-group">
+                        <label for="pilotUsername">Username</label>
+                        <input type="text" id="pilotUsername" placeholder="e.g., priya.pilot">
+                    </div>
+                    <div class="form-group">
+                        <label for="pilotPassword">Password</label>
+                        <input type="password" id="pilotPassword" placeholder="At least 6 characters">
+                    </div>
+                    <button type="button" class="button" id="createPilotBtn" style="width:auto;" onclick="createPilotUser()">Create Pilot Account</button>
+
+                    <div id="pilotUserList" style="margin-top: 20px;"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -675,8 +702,9 @@
             const savedToken = localStorage.getItem('chatbot_token');
             if (savedUser && savedToken) {
                 currentUser = JSON.parse(savedUser);
+                if (!currentUser.role) currentUser.role = 'staff'; // sessions saved before roles existed
                 showUploadInterface();
-                loadUploadHistory();
+                if (currentUser.role === 'staff') loadUploadHistory();
             }
 
             // File upload events
@@ -782,13 +810,13 @@
                 const data = await response.json();
 
                 if (response.ok && data.success) {
-                    currentUser = { username: data.username };
+                    currentUser = { username: data.username, role: data.role || 'staff' };
                     localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
                     localStorage.setItem('chatbot_token', data.access_token);
                     showAlert('loginAlert', 'Login successful!', 'success');
                     setTimeout(() => {
                         showUploadInterface();
-                        loadUploadHistory();
+                        if (currentUser.role === 'staff') loadUploadHistory();
                     }, 500);
                 } else {
                     showAlert('loginAlert', data.error || 'Invalid username or password', 'error');
@@ -828,12 +856,12 @@
                     const loginResp = await fetch('/login', { method: 'POST', body: loginData });
                     const loginResult = await loginResp.json();
                     if (loginResp.ok && loginResult.success) {
-                        currentUser = { username: loginResult.username };
+                        currentUser = { username: loginResult.username, role: loginResult.role || 'staff' };
                         localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
                         localStorage.setItem('chatbot_token', loginResult.access_token);
                         setTimeout(() => {
                             showUploadInterface();
-                            loadUploadHistory();
+                            if (currentUser.role === 'staff') loadUploadHistory();
                         }, 500);
                     }
                 } else {
@@ -883,6 +911,14 @@
             document.getElementById('uploadSection').classList.add('active');
             document.getElementById('uploadSection').style.display = 'block';
             document.getElementById('currentUser').textContent = currentUser.username || currentUser.email;
+
+            const isPilot = currentUser.role === 'pilot';
+            document.querySelectorAll('.staff-only-tab').forEach(el => {
+                el.style.display = isPilot ? 'none' : '';
+            });
+            if (isPilot) {
+                switchTab('chat');
+            }
         }
 
         function toggleSignup() {
@@ -901,13 +937,17 @@
 
             // Show selected tab
             document.getElementById(tab + 'Tab').classList.add('active');
-            event.target.classList.add('active');
+            const btn = document.querySelector(`.tab-button[data-tab="${tab}"]`);
+            if (btn) btn.classList.add('active');
 
             if (tab === 'chat') {
                 document.getElementById('chatInput').focus();
             }
             if (tab === 'outreach') {
                 loadCandidates();
+            }
+            if (tab === 'pilots') {
+                loadPilotUsers();
             }
         }
 
@@ -1315,6 +1355,95 @@
                 btn.disabled = false;
                 btn.textContent = 'Send Update to Selected';
             }
+        }
+
+        // Pilot user management (staff only)
+        async function createPilotUser() {
+            const fullname = document.getElementById('pilotFullname').value.trim();
+            const username = document.getElementById('pilotUsername').value.trim();
+            const password = document.getElementById('pilotPassword').value;
+
+            if (!username || !password) {
+                showAlert('pilotsAlert', 'Username and password are required', 'error');
+                return;
+            }
+            if (password.length < 6) {
+                showAlert('pilotsAlert', 'Password must be at least 6 characters', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('createPilotBtn');
+            btn.disabled = true;
+            btn.textContent = 'Creating...';
+
+            try {
+                const response = await authedFetch('/pilot-users', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fullname, username, password })
+                });
+                const data = await response.json();
+                if (response.ok && data.success) {
+                    showAlert('pilotsAlert', `Pilot account "${username}" created — share these credentials with them directly.`, 'success');
+                    document.getElementById('pilotFullname').value = '';
+                    document.getElementById('pilotUsername').value = '';
+                    document.getElementById('pilotPassword').value = '';
+                    loadPilotUsers();
+                } else {
+                    showAlert('pilotsAlert', data.error || 'Could not create pilot account', 'error');
+                }
+            } catch (error) {
+                showAlert('pilotsAlert', 'Error creating pilot account: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Create Pilot Account';
+            }
+        }
+
+        function loadPilotUsers() {
+            authedFetch('/pilot-users')
+                .then(response => response.json())
+                .then(data => {
+                    const div = document.getElementById('pilotUserList');
+                    if (data.users && data.users.length > 0) {
+                        div.innerHTML = data.users.map(u => `
+                            <div class="file-item">
+                                <div>
+                                    <div class="file-name">${u.fullname || u.username}</div>
+                                    <div class="file-size">
+                                        ${u.username} &middot;
+                                        ${u.last_login ? 'last active ' + new Date(u.last_login).toLocaleString() : 'never logged in'}
+                                    </div>
+                                </div>
+                                <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px; color:#e74c3c;"
+                                    onclick="revokePilotUser('${u.username}')">
+                                    Revoke
+                                </button>
+                            </div>
+                        `).join('');
+                    } else {
+                        div.innerHTML = '<p style="color:#999; text-align:center;">No pilot accounts yet.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading pilot users:', error);
+                    showAlert('pilotsAlert', 'Could not load pilot accounts', 'error');
+                });
+        }
+
+        function revokePilotUser(username) {
+            if (!confirm(`Revoke pilot access for "${username}"?`)) return;
+            authedFetch(`/pilot-users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert('pilotsAlert', 'Revoked', 'success');
+                        loadPilotUsers();
+                    } else {
+                        showAlert('pilotsAlert', data.error || 'Could not revoke access', 'error');
+                    }
+                })
+                .catch(error => showAlert('pilotsAlert', 'Error revoking access: ' + error.message, 'error'));
         }
 
         // Utility functions

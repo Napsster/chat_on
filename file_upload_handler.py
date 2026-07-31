@@ -32,6 +32,9 @@ class User(Base):
     fullname = Column(String(200))
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
+    # 'staff' (full tool access) or 'pilot' (chat-only — for real employees/
+    # candidates trying the bot without knowledge-base edit or outreach access)
+    role = Column(String(20), default='staff', nullable=False)
 
 class Upload(Base):
     """Upload history model"""
@@ -91,16 +94,24 @@ class FileUploadManager:
         """create_all() only creates missing tables, not missing columns on
         existing ones — handle columns added after the initial deploy here."""
         with self.engine.connect() as conn:
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(knowledge_documents)"))]
-            if cols and 'audience' not in cols:
+            kd_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(knowledge_documents)"))]
+            if kd_cols and 'audience' not in kd_cols:
                 conn.execute(text(
                     "ALTER TABLE knowledge_documents ADD COLUMN audience VARCHAR(20) DEFAULT 'both' NOT NULL"
                 ))
                 conn.commit()
                 logger.info("Migrated knowledge_documents: added audience column (default 'both')")
 
+            user_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
+            if user_cols and 'role' not in user_cols:
+                conn.execute(text(
+                    "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'staff' NOT NULL"
+                ))
+                conn.commit()
+                logger.info("Migrated users: added role column (default 'staff' — existing accounts keep full access)")
+
     # User Authentication Methods
-    def register_user(self, username: str, email: str, password: str, fullname: str = "") -> Tuple[bool, str]:
+    def register_user(self, username: str, email: str, password: str, fullname: str = "", role: str = 'staff') -> Tuple[bool, str]:
         """
         Register a new user
 
@@ -109,10 +120,13 @@ class FileUploadManager:
             email: Email address
             password: Plain text password
             fullname: User's full name
+            role: 'staff' (full tool access, default) or 'pilot' (chat-only)
 
         Returns:
             Tuple of (success, message)
         """
+        if role not in ('staff', 'pilot'):
+            role = 'staff'
         session = self.Session()
         try:
             # Check if user exists
@@ -129,12 +143,13 @@ class FileUploadManager:
                 username=username,
                 email=email,
                 password_hash=password_hash,
-                fullname=fullname
+                fullname=fullname,
+                role=role
             )
             session.add(new_user)
             session.commit()
 
-            logger.info(f"User registered: {username}")
+            logger.info(f"User registered: {username} (role={role})")
             return True, "User registered successfully"
 
         except Exception as e:
@@ -186,10 +201,53 @@ class FileUploadManager:
             user = session.query(User).filter(User.username == username).first()
             if not user:
                 return None
-            return {'id': user.id, 'username': user.username, 'email': user.email, 'fullname': user.fullname}
+            return {'id': user.id, 'username': user.username, 'email': user.email, 'fullname': user.fullname, 'role': user.role}
         except Exception as e:
             logger.error(f"Error looking up user: {e}")
             return None
+        finally:
+            session.close()
+
+    def list_users(self, role: Optional[str] = None) -> List[Dict]:
+        """List users, most recently created first. Filter by role if given."""
+        session = self.Session()
+        try:
+            query = session.query(User)
+            if role:
+                query = query.filter(User.role == role)
+            users = query.order_by(User.created_at.desc()).all()
+            return [
+                {
+                    'id': u.id,
+                    'username': u.username,
+                    'email': u.email,
+                    'fullname': u.fullname,
+                    'role': u.role,
+                    'created_at': u.created_at.isoformat() if u.created_at else None,
+                    'last_login': u.last_login.isoformat() if u.last_login else None,
+                }
+                for u in users
+            ]
+        except Exception as e:
+            logger.error(f"Error listing users: {e}")
+            return []
+        finally:
+            session.close()
+
+    def delete_user_by_username(self, username: str) -> Tuple[bool, str]:
+        """Permanently remove a user account (e.g. revoking a pilot participant)"""
+        session = self.Session()
+        try:
+            user = session.query(User).filter(User.username == username).first()
+            if not user:
+                return False, "User not found"
+            session.delete(user)
+            session.commit()
+            logger.info(f"User deleted: {username}")
+            return True, "Deleted"
+        except Exception as e:
+            logger.error(f"Error deleting user: {e}")
+            return False, str(e)
         finally:
             session.close()
 
