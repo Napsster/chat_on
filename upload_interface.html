@@ -359,6 +359,69 @@
                 gap: 10px;
             }
         }
+
+        .chat-log {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            height: 380px;
+            overflow-y: auto;
+            padding: 15px;
+            background: #f7f7f9;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+
+        .chat-bubble {
+            max-width: 80%;
+            padding: 10px 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+        }
+
+        .chat-bubble.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+
+        .chat-bubble.bot {
+            align-self: flex-start;
+            background: white;
+            color: #333;
+            border: 1px solid #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .chat-bubble.pending {
+            opacity: 0.6;
+        }
+
+        .chat-input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .chat-input-row input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .chat-input-row input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .chat-input-row button {
+            width: auto;
+            padding: 12px 20px;
+        }
     </style>
 </head>
 <body>
@@ -442,6 +505,7 @@
                     <button class="tab-button" onclick="switchTab('text')">📝 Add Text Content</button>
                     <button class="tab-button" onclick="switchTab('history')">📋 Upload History</button>
                     <button class="tab-button" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
+                    <button class="tab-button" onclick="switchTab('chat')">💬 Try the Bot</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -501,6 +565,22 @@
                         Deactivate or delete a document to remove it from the bot's answers.
                     </p>
                     <div id="knowledgeDocuments" style="margin-top: 10px;"></div>
+                </div>
+
+                <!-- Chat Tab -->
+                <div id="chatTab" class="tab-content">
+                    <div id="chatAlert"></div>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Chat with the same bot that answers on WhatsApp, grounded in whatever
+                        is currently in the knowledge base — a quick way to check an upload
+                        actually changed what it answers.
+                        <a href="#" onclick="resetChat(); return false;" style="color:#667eea;">Reset conversation</a>
+                    </p>
+                    <div class="chat-log" id="chatLog"></div>
+                    <form class="chat-input-row" id="chatForm" onsubmit="return sendChatMessage(event);">
+                        <input type="text" id="chatInput" placeholder="Ask something an employee might ask..." autocomplete="off">
+                        <button type="submit" class="button">Send</button>
+                    </form>
                 </div>
             </div>
         </div>
@@ -745,6 +825,10 @@
             // Show selected tab
             document.getElementById(tab + 'Tab').classList.add('active');
             event.target.classList.add('active');
+
+            if (tab === 'chat') {
+                document.getElementById('chatInput').focus();
+            }
         }
 
         // Upload functions
@@ -918,6 +1002,61 @@
                     }
                 })
                 .catch(error => showAlert('knowledgeAlert', 'Error deleting document: ' + error.message, 'error'));
+        }
+
+        // Chat functions
+        function appendChatBubble(role, text, pending) {
+            const log = document.getElementById('chatLog');
+            const bubble = document.createElement('div');
+            bubble.className = 'chat-bubble ' + role + (pending ? ' pending' : '');
+            bubble.textContent = text;
+            log.appendChild(bubble);
+            log.scrollTop = log.scrollHeight;
+            return bubble;
+        }
+
+        async function sendChatMessage(event) {
+            event.preventDefault();
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            if (!message) return false;
+
+            input.value = '';
+            appendChatBubble('user', message);
+            const pending = appendChatBubble('bot', 'Thinking...', true);
+
+            try {
+                const response = await authedFetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await response.json();
+
+                pending.classList.remove('pending');
+                if (response.ok && data.reply) {
+                    pending.textContent = data.reply;
+                } else {
+                    pending.textContent = 'Error: ' + (data.error || 'Something went wrong');
+                }
+            } catch (error) {
+                pending.classList.remove('pending');
+                pending.textContent = 'Error: ' + error.message;
+            }
+
+            document.getElementById('chatLog').scrollTop = document.getElementById('chatLog').scrollHeight;
+            return false;
+        }
+
+        async function resetChat() {
+            if (!confirm('Clear this conversation and start fresh?')) return;
+            try {
+                await authedFetch('/chat/reset', { method: 'POST' });
+                document.getElementById('chatLog').innerHTML = '';
+                showAlert('chatAlert', 'Conversation reset', 'info');
+            } catch (error) {
+                showAlert('chatAlert', 'Error resetting conversation: ' + error.message, 'error');
+            }
         }
 
         // Utility functions

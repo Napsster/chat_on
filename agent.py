@@ -389,6 +389,54 @@ async def whatsapp_webhook(request: Request):
         return Response(content=str(resp), media_type="application/xml")
 
 
+# --- Web chat (browser testing of the same bot, no WhatsApp needed) --------
+# Session keyed by "web-<username>" — same get_user_data/save_user_data
+# storage as WhatsApp, just namespaced so it never collides with real phone
+# numbers. Requires login (reuses the upload-interface's auth).
+
+@app.post("/chat")
+async def chat(request: Request, current_user: dict = Depends(get_current_user)):
+    """Web chat endpoint — same grounded RAG+LLM pipeline as /whatsapp, for
+    trying out the bot in a browser instead of over WhatsApp."""
+    try:
+        data = await request.json()
+        message = (data.get("message") or "").strip()
+        if not message:
+            return JSONResponse({"error": "Message required"}, status_code=400)
+
+        session_key = f"web-{current_user['username']}"
+        user_data = get_user_data(session_key)
+        is_first_interaction = not user_data["history"]
+
+        prev_user = next(
+            (m["content"] for m in reversed(user_data["history"]) if m["role"] == "user"),
+            "",
+        )
+        retrieval_query = f"{prev_user} {message}".strip()
+        kb_context = retrieve_context(retrieval_query)
+
+        user_data["history"].append({"role": "user", "content": message})
+        reply = generate_reply(user_data, kb_context, profile_block=None)
+        if is_first_interaction:
+            reply += FIRST_MESSAGE_DISCLAIMER
+        user_data["history"].append({"role": "assistant", "content": reply})
+        save_user_data(session_key, user_data)
+
+        return JSONResponse({"reply": reply})
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/chat/reset")
+async def chat_reset(current_user: dict = Depends(get_current_user)):
+    """Clear the web chat session's history for the logged-in user"""
+    session_key = f"web-{current_user['username']}"
+    save_user_data(session_key, {"phone": session_key, "email": None, "history": []})
+    return JSONResponse({"success": True})
+
+
 # ============================================================================
 # FILE UPLOAD / HR WEB INTERFACE
 # ============================================================================
