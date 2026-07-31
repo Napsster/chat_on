@@ -33,7 +33,8 @@ class GoogleDriveSync:
                  service_account_file: Optional[str] = None,
                  folder_id: str = "1aGaZa6N2i2CbZ1xY7k9AAzUO9b3hy4Ju",
                  cache_dir: str = "/home/chetan/apps/onboarding-agent",
-                 cache_ttl_hours: int = 1):
+                 cache_ttl_hours: int = 1,
+                 knowledge_filename: str = "knowledge.md"):
         """
         Initialize Google Drive sync.
 
@@ -42,11 +43,14 @@ class GoogleDriveSync:
             folder_id: Google Drive folder ID containing markdown files
             cache_dir: Directory to store downloaded files and cache
             cache_ttl_hours: Cache TTL in hours (how often to sync with Drive)
+            knowledge_filename: Filename (within cache_dir) to write synced
+                content to
         """
         self.folder_id = folder_id
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.cache_ttl = timedelta(hours=cache_ttl_hours)
+        self.knowledge_filename = knowledge_filename
         self.service = None
         self.last_sync = None
         self.sync_cache_file = self.cache_dir / ".google_drive_sync_cache.json"
@@ -198,7 +202,7 @@ class GoogleDriveSync:
                 return False, "Could not download any markdown files"
 
             # Save merged knowledge
-            knowledge_file = self.cache_dir / "knowledge.md"
+            knowledge_file = self.cache_dir / self.knowledge_filename
             with open(knowledge_file, 'w', encoding='utf-8') as f:
                 f.write(merged_content)
 

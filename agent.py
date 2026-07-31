@@ -52,7 +52,13 @@ UPLOAD_MEDIA_DIR = APP_DIR / "data" / "uploads"
 # --- Candidate directory (onboarding log) for personalisation --------------
 DIRECTORY = CandidateDirectory(APP_DIR)
 
-# --- Knowledge base (single source of truth) ------------------------------
+# --- Knowledge base ---------------------------------------------------------
+# knowledge_base.md: curated, git-tracked core (hand-edited, or overwritten by
+#   Google Drive sync if that's ever configured).
+# knowledge.md: generated (gitignored) — base + every active HR-uploaded
+#   document, rebuilt by rebuild_and_reload_knowledge(). This is what the bot
+#   actually loads/embeds.
+KNOWLEDGE_BASE_FILE = APP_DIR / "knowledge_base.md"
 KNOWLEDGE_FILE = APP_DIR / "knowledge.md"
 TOP_K = 8
 
@@ -86,17 +92,19 @@ DRIVE_SYNC = GoogleDriveSync(
     folder_id=GOOGLE_DRIVE_FOLDER_ID,
     cache_dir=str(APP_DIR),
     cache_ttl_hours=GOOGLE_DRIVE_SYNC_TTL_HOURS,
+    knowledge_filename="knowledge_base.md",
 )
 
 
 def sync_knowledge_from_drive():
-    """Best-effort refresh of knowledge.md from Drive; no-ops if not configured
-    or if the TTL hasn't elapsed. Only reloads the vector store if the file
-    content actually changed."""
+    """Best-effort refresh of knowledge_base.md from Drive; no-ops if not
+    configured or if the TTL hasn't elapsed. If the base content actually
+    changed, rebuilds knowledge.md on top of it (so active HR-uploaded
+    documents aren't lost) and reloads the vector store."""
     if not DRIVE_SYNC.service:
         return
     try:
-        before = KNOWLEDGE_FILE.read_bytes()
+        before = KNOWLEDGE_BASE_FILE.read_bytes()
     except Exception:
         before = None
     success, message = DRIVE_SYNC.sync_knowledge_base()
@@ -104,12 +112,12 @@ def sync_knowledge_from_drive():
         logger.debug(f"Google Drive sync skipped: {message}")
         return
     try:
-        after = KNOWLEDGE_FILE.read_bytes()
+        after = KNOWLEDGE_BASE_FILE.read_bytes()
     except Exception:
         after = None
     if after != before:
         logger.info(f"Knowledge base updated from Google Drive: {message}")
-        reload_knowledge_base()
+        rebuild_and_reload_knowledge()
 
 # --- LLM config -----------------------------------------------------------
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
@@ -390,6 +398,22 @@ upload_manager = FileUploadManager(
 )
 file_processor = UploadedFileProcessor(knowledge_dir=PROJECT_DIR)
 
+# Text formats we can merge directly into the knowledge base. PDFs/DOCX are
+# still saved and tracked as general uploads, just not merged (no extraction
+# library wired up).
+KNOWLEDGE_MERGEABLE_EXTENSIONS = {'.md', '.txt'}
+
+
+def rebuild_and_reload_knowledge():
+    """Regenerate knowledge.md from knowledge_base.md + active HR-uploaded
+    documents, then reload it into the running vector store."""
+    active_docs = upload_manager.list_knowledge_documents(active_only=True)
+    success, message = file_processor.rebuild_knowledge_md(active_docs)
+    if success:
+        reload_knowledge_base()
+    else:
+        logger.error(f"Could not rebuild knowledge.md: {message}")
+
 
 @app.get("/upload-interface")
 async def get_upload_interface():
@@ -486,6 +510,8 @@ async def upload_files(
         files = form.getlist('files')
         uploaded_count = 0
         errors = []
+        notes = []
+        added_to_knowledge = False
 
         for file in files:
             if not file.filename:
@@ -505,13 +531,29 @@ async def upload_files(
             )
 
             if success:
-                if file.filename.endswith('.md'):
-                    file_processor.process_markdown(file_path, username)
-
                 uploaded_count += 1
                 logger.info(f"File uploaded: {file.filename} by {username}")
+
+                ext = Path(file.filename).suffix.lower()
+                if ext in KNOWLEDGE_MERGEABLE_EXTENSIONS:
+                    try:
+                        text = content.decode('utf-8')
+                        ok, kmsg, _ = upload_manager.add_knowledge_document(
+                            title=file.filename, content=text, uploaded_by=username
+                        )
+                        if ok:
+                            added_to_knowledge = True
+                        else:
+                            notes.append(f"{file.filename}: saved, but not added to knowledge base ({kmsg})")
+                    except UnicodeDecodeError:
+                        notes.append(f"{file.filename}: saved, but not added to knowledge base (not valid text)")
+                else:
+                    notes.append(f"{file.filename}: saved, but not added to knowledge base ({ext} text extraction not supported)")
             else:
                 errors.append(f"{file.filename}: {msg}")
+
+        if added_to_knowledge:
+            rebuild_and_reload_knowledge()
 
         response = {
             "success": uploaded_count > 0,
@@ -522,6 +564,8 @@ async def upload_files(
 
         if errors:
             response["errors"] = errors
+        if notes:
+            response["notes"] = notes
 
         return JSONResponse(response)
 
@@ -556,6 +600,14 @@ async def upload_text(request: Request):
         )
 
         if success:
+            ok, kmsg, _ = upload_manager.add_knowledge_document(
+                title=title, content=content, uploaded_by=username
+            )
+            if ok:
+                rebuild_and_reload_knowledge()
+            else:
+                logger.error(f"Could not add knowledge document from text upload: {kmsg}")
+
             return JSONResponse({
                 "success": True,
                 "message": message
@@ -597,6 +649,47 @@ async def get_upload_history(username: str):
             {"error": str(e)},
             status_code=500
         )
+
+
+@app.get("/knowledge/documents")
+async def list_knowledge_documents():
+    """List every document contributing to (or retired from) the bot's knowledge base"""
+    try:
+        docs = upload_manager.list_knowledge_documents()
+        for d in docs:
+            d.pop('content', None)  # keep the listing light; full text not needed here
+        return JSONResponse({"success": True, "documents": docs})
+    except Exception as e:
+        logger.error(f"List knowledge documents error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.post("/knowledge/documents/{doc_id}/toggle")
+async def toggle_knowledge_document(doc_id: int, active: bool = Form(...)):
+    """Activate or deactivate a knowledge document without deleting it"""
+    try:
+        success, message = upload_manager.set_knowledge_document_active(doc_id, active)
+        if not success:
+            return JSONResponse({"success": False, "error": message}, status_code=404)
+        rebuild_and_reload_knowledge()
+        return JSONResponse({"success": True, "active": active})
+    except Exception as e:
+        logger.error(f"Toggle knowledge document error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/knowledge/documents/{doc_id}")
+async def delete_knowledge_document(doc_id: int):
+    """Permanently remove a knowledge document"""
+    try:
+        success, message = upload_manager.delete_knowledge_document(doc_id)
+        if not success:
+            return JSONResponse({"success": False, "error": message}, status_code=404)
+        rebuild_and_reload_knowledge()
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Delete knowledge document error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 # ============================================================================
@@ -648,6 +741,7 @@ async def startup_event():
     logger.info("=" * 60)
     logger.info(f"Upload directory: {PROJECT_DIR}/uploads")
     logger.info(f"Database: {PROJECT_DIR}/chatbot.db")
+    rebuild_and_reload_knowledge()
     if DRIVE_SYNC.service:
         sync_knowledge_from_drive()
     else:

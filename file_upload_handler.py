@@ -11,7 +11,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import hashlib
-from sqlalchemy import create_engine, Column, String, DateTime, Integer
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -43,6 +43,17 @@ class Upload(Base):
     file_size = Column(Integer)
     uploaded_at = Column(DateTime, default=datetime.utcnow)
     file_type = Column(String(50))
+
+class KnowledgeDocument(Base):
+    """A document that contributes to the WhatsApp bot's knowledge base"""
+    __tablename__ = "knowledge_documents"
+
+    id = Column(Integer, primary_key=True)
+    title = Column(String(500), nullable=False)
+    content = Column(Text, nullable=False)
+    uploaded_by = Column(String(100), nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    active = Column(Boolean, default=True, nullable=False)
 
 class FileUploadManager:
     """Manages file uploads and user authentication"""
@@ -266,6 +277,87 @@ class FileUploadManager:
         finally:
             session.close()
 
+    # Knowledge base document methods
+    def add_knowledge_document(self, title: str, content: str, uploaded_by: str) -> Tuple[bool, str, Optional[int]]:
+        """Add a document that contributes to the bot's knowledge base"""
+        session = self.Session()
+        try:
+            doc = KnowledgeDocument(
+                title=title,
+                content=content,
+                uploaded_by=uploaded_by,
+            )
+            session.add(doc)
+            session.commit()
+            logger.info(f"Knowledge document added: {title} by {uploaded_by}")
+            return True, "Knowledge document added", doc.id
+        except Exception as e:
+            logger.error(f"Error adding knowledge document: {e}")
+            return False, str(e), None
+        finally:
+            session.close()
+
+    def list_knowledge_documents(self, active_only: bool = False) -> List[Dict]:
+        """List knowledge base documents, most recent first"""
+        session = self.Session()
+        try:
+            query = session.query(KnowledgeDocument)
+            if active_only:
+                query = query.filter(KnowledgeDocument.active == True)
+            docs = query.order_by(KnowledgeDocument.uploaded_at.desc()).all()
+
+            return [
+                {
+                    'id': d.id,
+                    'title': d.title,
+                    'content': d.content,
+                    'uploaded_by': d.uploaded_by,
+                    'uploaded_at': d.uploaded_at.isoformat(),
+                    'active': d.active,
+                    'size': len(d.content),
+                }
+                for d in docs
+            ]
+        except Exception as e:
+            logger.error(f"Error listing knowledge documents: {e}")
+            return []
+        finally:
+            session.close()
+
+    def set_knowledge_document_active(self, doc_id: int, active: bool) -> Tuple[bool, str]:
+        """Activate or deactivate a knowledge document without deleting it"""
+        session = self.Session()
+        try:
+            doc = session.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
+            if not doc:
+                return False, "Document not found"
+            doc.active = active
+            session.commit()
+            logger.info(f"Knowledge document {doc_id} set active={active}")
+            return True, "Updated"
+        except Exception as e:
+            logger.error(f"Error updating knowledge document: {e}")
+            return False, str(e)
+        finally:
+            session.close()
+
+    def delete_knowledge_document(self, doc_id: int) -> Tuple[bool, str]:
+        """Permanently remove a knowledge document"""
+        session = self.Session()
+        try:
+            doc = session.query(KnowledgeDocument).filter(KnowledgeDocument.id == doc_id).first()
+            if not doc:
+                return False, "Document not found"
+            session.delete(doc)
+            session.commit()
+            logger.info(f"Knowledge document {doc_id} deleted")
+            return True, "Deleted"
+        except Exception as e:
+            logger.error(f"Error deleting knowledge document: {e}")
+            return False, str(e)
+        finally:
+            session.close()
+
     # Google Drive Integration
     def sync_uploads_to_drive(self, username: str, google_sync) -> Tuple[bool, str]:
         """
@@ -312,6 +404,32 @@ class UploadedFileProcessor:
             knowledge_dir: Directory containing knowledge base
         """
         self.knowledge_dir = Path(knowledge_dir)
+        self.base_file = self.knowledge_dir / "knowledge_base.md"
+        self.output_file = self.knowledge_dir / "knowledge.md"
+
+    def rebuild_knowledge_md(self, active_docs: List[Dict]) -> Tuple[bool, str]:
+        """
+        Regenerate knowledge.md from the curated base file plus active
+        HR-uploaded documents. Overwrites knowledge.md; never touches the base.
+
+        Args:
+            active_docs: list of dicts with 'title' and 'content' keys
+
+        Returns:
+            Tuple of (success, message)
+        """
+        try:
+            base_content = self.base_file.read_text(encoding='utf-8') if self.base_file.exists() else ""
+            sections = [base_content.rstrip()] if base_content.strip() else []
+            for doc in active_docs:
+                sections.append(f"## File: {doc['title']}\n\n{doc['content'].strip()}")
+            merged = "\n\n---\n\n".join(sections)
+            self.output_file.write_text(merged, encoding='utf-8')
+            logger.info(f"knowledge.md rebuilt: base + {len(active_docs)} uploaded document(s)")
+            return True, f"knowledge.md rebuilt with {len(active_docs)} uploaded document(s)"
+        except Exception as e:
+            logger.error(f"Error rebuilding knowledge.md: {e}")
+            return False, str(e)
 
     def process_markdown(self, file_path: str, username: str) -> Tuple[bool, str]:
         """

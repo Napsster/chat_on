@@ -441,6 +441,7 @@
                     <button class="tab-button active" onclick="switchTab('upload')">📤 Upload Files</button>
                     <button class="tab-button" onclick="switchTab('text')">📝 Add Text Content</button>
                     <button class="tab-button" onclick="switchTab('history')">📋 Upload History</button>
+                    <button class="tab-button" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -489,6 +490,17 @@
                 <div id="historyTab" class="tab-content">
                     <div id="historyAlert"></div>
                     <div id="uploadHistory" style="margin-top: 20px;"></div>
+                </div>
+
+                <!-- Knowledge Base Tab -->
+                <div id="knowledgeTab" class="tab-content">
+                    <div id="knowledgeAlert"></div>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                        Documents the WhatsApp bot currently answers from. Uploaded
+                        .md/.txt files and pasted text content appear here automatically.
+                        Deactivate or delete a document to remove it from the bot's answers.
+                    </p>
+                    <div id="knowledgeDocuments" style="margin-top: 10px;"></div>
                 </div>
             </div>
         </div>
@@ -776,7 +788,7 @@
                         historyDiv.innerHTML = data.files.map(file => `
                             <div class="file-item">
                                 <div>
-                                    <div class="file-name">${file.name}</div>
+                                    <div class="file-name">${file.filename}</div>
                                     <div class="file-size">${new Date(file.uploadedAt).toLocaleString()}</div>
                                 </div>
                             </div>
@@ -789,6 +801,76 @@
                     console.error('Error loading history:', error);
                     showAlert('historyAlert', 'Could not load upload history', 'error');
                 });
+
+            loadKnowledgeDocuments();
+        }
+
+        function loadKnowledgeDocuments() {
+            if (!currentUser) return;
+
+            fetch('/knowledge/documents')
+                .then(response => response.json())
+                .then(data => {
+                    const div = document.getElementById('knowledgeDocuments');
+                    if (data.documents && data.documents.length > 0) {
+                        div.innerHTML = data.documents.map(doc => `
+                            <div class="file-item">
+                                <div>
+                                    <div class="file-name">${doc.title} ${doc.active ? '' : '<span style="color:#e74c3c;font-weight:normal;">(inactive)</span>'}</div>
+                                    <div class="file-size">
+                                        ${(doc.size / 1024).toFixed(1)} KB &middot;
+                                        uploaded by ${doc.uploaded_by} on ${new Date(doc.uploaded_at).toLocaleString()}
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px;"
+                                        onclick="toggleKnowledgeDocument(${doc.id}, ${!doc.active})">
+                                        ${doc.active ? 'Deactivate' : 'Activate'}
+                                    </button>
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px; color:#e74c3c;"
+                                        onclick="deleteKnowledgeDocument(${doc.id})">
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        div.innerHTML = '<p style="color: #999; text-align: center;">No knowledge base documents yet — upload a .md/.txt file or add text content to feed the bot.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading knowledge documents:', error);
+                    showAlert('knowledgeAlert', 'Could not load knowledge base documents', 'error');
+                });
+        }
+
+        function toggleKnowledgeDocument(id, active) {
+            const formData = new FormData();
+            formData.append('active', active);
+            fetch(`/knowledge/documents/${id}/toggle`, { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        loadKnowledgeDocuments();
+                    } else {
+                        showAlert('knowledgeAlert', data.error || 'Could not update document', 'error');
+                    }
+                })
+                .catch(error => showAlert('knowledgeAlert', 'Error updating document: ' + error.message, 'error'));
+        }
+
+        function deleteKnowledgeDocument(id) {
+            if (!confirm('Permanently delete this document from the knowledge base?')) return;
+            fetch(`/knowledge/documents/${id}`, { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        loadKnowledgeDocuments();
+                    } else {
+                        showAlert('knowledgeAlert', data.error || 'Could not delete document', 'error');
+                    }
+                })
+                .catch(error => showAlert('knowledgeAlert', 'Error deleting document: ' + error.message, 'error'));
         }
 
         // Utility functions
