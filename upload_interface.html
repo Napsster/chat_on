@@ -550,7 +550,10 @@
                     <div class="file-list" id="fileList"></div>
 
                     <div id="uploadProgress" style="display: none;">
-                        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Uploading...</p>
+                        <p style="color: #666; font-size: 14px; margin-bottom: 10px;">
+                            Uploading and rebuilding the knowledge base — this can take up to
+                            2 minutes, please don't close this tab.
+                        </p>
                         <div class="progress-bar">
                             <div class="progress-fill" id="progressFill"></div>
                         </div>
@@ -582,7 +585,7 @@
                         </select>
                     </div>
 
-                    <button type="button" class="button" onclick="uploadText()">Add Content</button>
+                    <button type="button" class="button" id="uploadTextBtn" onclick="uploadText()">Add Content</button>
                 </div>
 
                 <!-- History Tab -->
@@ -926,6 +929,10 @@
                 return;
             }
 
+            const btn = document.getElementById('uploadTextBtn');
+            btn.disabled = true;
+            btn.textContent = 'Adding and rebuilding knowledge base (up to 2 min)...';
+
             try {
                 const response = await authedFetch('/upload/text', {
                     method: 'POST',
@@ -951,6 +958,9 @@
                 }
             } catch (error) {
                 showAlert('textAlert', 'Error uploading content: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Add Content';
             }
         }
 
@@ -1035,12 +1045,14 @@
         }
 
         function setKnowledgeDocumentAudience(id, audience) {
+            showAlert('knowledgeAlert', 'Rebuilding knowledge base — this can take up to 2 minutes...', 'info');
             const formData = new FormData();
             formData.append('audience', audience);
             authedFetch(`/knowledge/documents/${id}/audience`, { method: 'POST', body: formData })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
+                        showAlert('knowledgeAlert', 'Updated', 'success');
                         loadKnowledgeDocuments();
                     } else {
                         showAlert('knowledgeAlert', data.error || 'Could not update audience', 'error');
@@ -1050,12 +1062,14 @@
         }
 
         function toggleKnowledgeDocument(id, active) {
+            showAlert('knowledgeAlert', 'Rebuilding knowledge base — this can take up to 2 minutes...', 'info');
             const formData = new FormData();
             formData.append('active', active);
             authedFetch(`/knowledge/documents/${id}/toggle`, { method: 'POST', body: formData })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
+                        showAlert('knowledgeAlert', 'Updated', 'success');
                         loadKnowledgeDocuments();
                     } else {
                         showAlert('knowledgeAlert', data.error || 'Could not update document', 'error');
@@ -1066,10 +1080,12 @@
 
         function deleteKnowledgeDocument(id) {
             if (!confirm('Permanently delete this document from the knowledge base?')) return;
+            showAlert('knowledgeAlert', 'Rebuilding knowledge base — this can take up to 2 minutes...', 'info');
             authedFetch(`/knowledge/documents/${id}`, { method: 'DELETE' })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
+                        showAlert('knowledgeAlert', 'Deleted', 'success');
                         loadKnowledgeDocuments();
                     } else {
                         showAlert('knowledgeAlert', data.error || 'Could not delete document', 'error');
