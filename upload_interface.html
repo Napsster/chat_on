@@ -21,6 +21,14 @@
             padding: 20px;
         }
 
+        /* Once logged in, the tool takes over the whole viewport instead of
+           floating as a centered card — the login screen stays a normal
+           centered card (body's flex-centering above handles that). */
+        body.app-mode {
+            display: block;
+            padding: 0;
+        }
+
         .container {
             background: white;
             border-radius: 10px;
@@ -28,6 +36,13 @@
             width: 100%;
             max-width: 600px;
             overflow: hidden;
+        }
+
+        body.app-mode .container {
+            max-width: none;
+            min-height: 100vh;
+            border-radius: 0;
+            box-shadow: none;
         }
 
         .header {
@@ -49,6 +64,14 @@
 
         .content {
             padding: 40px;
+        }
+
+        /* Header/background fill the viewport in app-mode, but keep the
+           actual forms/lists at a comfortable reading width instead of
+           stretching edge-to-edge on wide screens. */
+        body.app-mode .content {
+            max-width: 1200px;
+            margin: 0 auto;
         }
 
         /* Login Form */
@@ -901,12 +924,14 @@
 
         // UI Switching
         function showLoginInterface() {
+            document.body.classList.remove('app-mode');
             document.getElementById('loginSection').style.display = 'block';
             document.getElementById('uploadSection').classList.remove('active');
             document.getElementById('uploadSection').style.display = 'none';
         }
 
         function showUploadInterface() {
+            document.body.classList.add('app-mode');
             document.getElementById('loginSection').style.display = 'none';
             document.getElementById('uploadSection').classList.add('active');
             document.getElementById('uploadSection').style.display = 'block';
