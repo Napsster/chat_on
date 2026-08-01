@@ -363,21 +363,20 @@
         }
 
         .logout-btn {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            border: 1px solid white;
+            background: white;
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
             padding: 8px 16px;
             border-radius: 5px;
             cursor: pointer;
             font-size: 12px;
             font-weight: 600;
+            flex-shrink: 0;
         }
 
         .logout-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
+            background: #e74c3c;
+            color: white;
         }
 
         @media (max-width: 600px) {
@@ -531,12 +530,9 @@
 
             <!-- Upload Section -->
             <div class="upload-section" id="uploadSection">
-                <div style="position: relative;">
-                    <button class="logout-btn" onclick="logout()">Logout</button>
-                </div>
-
                 <div class="user-info">
                     <span>Logged in as: <strong id="currentUser"></strong></span>
+                    <button class="logout-btn" onclick="logout()">Logout</button>
                 </div>
 
                 <!-- Tabs -->
