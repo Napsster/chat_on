@@ -79,6 +79,46 @@ def _shared_model_lazy():
     return _SHARED_MODEL
 
 
+def embed_texts(texts: list[str]) -> np.ndarray:
+    """L2-normalized embeddings for arbitrary text, via the same shared model
+    used for knowledge-base retrieval. Used outside the RAG path too — e.g.
+    clustering similar questions for the repeated-questions report."""
+    if not texts:
+        return np.zeros((0, 384), dtype=np.float32)
+    vecs = np.array(
+        list(_shared_model_lazy().embed(texts, batch_size=EMBED_BATCH_SIZE)),
+        dtype=np.float32,
+    )
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return vecs / norms
+
+
+def cluster_similar_texts(texts: list[str], threshold: float = 0.83) -> list[list[int]]:
+    """Greedy cosine-similarity clustering — groups indices into `texts`
+    whose pairwise similarity exceeds `threshold`. Every index appears in
+    exactly one cluster (singletons included); callers filter for clusters
+    with 2+ members to find actual repeats. O(n^2) — fine for a week's worth
+    of questions, not meant for large corpora."""
+    if not texts:
+        return []
+    vecs = embed_texts(texts)
+    sims = vecs @ vecs.T
+    assigned = [False] * len(texts)
+    clusters: list[list[int]] = []
+    for i in range(len(texts)):
+        if assigned[i]:
+            continue
+        group = [i]
+        assigned[i] = True
+        for j in range(i + 1, len(texts)):
+            if not assigned[j] and sims[i, j] >= threshold:
+                group.append(j)
+                assigned[j] = True
+        clusters.append(group)
+    return clusters
+
+
 class VectorStore:
     def __init__(self, knowledge_path: Path, cache_path: Path | None = None):
         self.knowledge_path = Path(knowledge_path)
@@ -97,18 +137,8 @@ class VectorStore:
         h = hashlib.sha256(self.knowledge_path.read_bytes()).hexdigest()
         return f"{h}:{MAX_CHARS}:{EMBED_MODEL}"
 
-    def _model_lazy(self):
-        return _shared_model_lazy()
-
     def _embed(self, texts: list[str]) -> np.ndarray:
-        vecs = np.array(
-            list(self._model_lazy().embed(texts, batch_size=EMBED_BATCH_SIZE)),
-            dtype=np.float32,
-        )
-        # L2-normalize so cosine similarity == dot product
-        norms = np.linalg.norm(vecs, axis=1, keepdims=True)
-        norms[norms == 0] = 1.0
-        return vecs / norms
+        return embed_texts(texts)
 
     def _build_or_load(self):
         current_hash = self._file_hash()

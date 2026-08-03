@@ -61,6 +61,19 @@ class KnowledgeDocument(Base):
     # 'pre_join', 'post_join', or 'both' (visible to segments that aren't yet known)
     audience = Column(String(20), default='both', nullable=False)
 
+class QuestionLog(Base):
+    """Every real question asked of the bot (WhatsApp or web chat) — feeds
+    the unanswered-questions and repeated-questions reports."""
+    __tablename__ = "question_log"
+
+    id = Column(Integer, primary_key=True)
+    asked_at = Column(DateTime, default=datetime.utcnow)
+    session_key = Column(String(100), nullable=False)  # phone number or web-<username>
+    channel = Column(String(20))  # 'whatsapp' or 'web'
+    question = Column(Text, nullable=False)
+    unanswered = Column(Boolean, default=False, nullable=False)
+    segment = Column(String(20))  # 'pre_join' / 'post_join' / None at time of asking
+
 class FileUploadManager:
     """Manages file uploads and user authentication"""
 
@@ -462,6 +475,48 @@ class FileUploadManager:
         except Exception as e:
             logger.error(f"Error deleting knowledge document: {e}")
             return False, str(e)
+        finally:
+            session.close()
+
+    # Question log (feeds the unanswered/repeated-questions reports)
+    def log_question(self, session_key: str, channel: str, question: str, unanswered: bool, segment: Optional[str] = None) -> None:
+        session = self.Session()
+        try:
+            session.add(QuestionLog(
+                session_key=session_key,
+                channel=channel,
+                question=question,
+                unanswered=unanswered,
+                segment=segment,
+            ))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error logging question: {e}")
+        finally:
+            session.close()
+
+    def get_questions_since(self, since: datetime, unanswered_only: bool = False) -> List[Dict]:
+        session = self.Session()
+        try:
+            query = session.query(QuestionLog).filter(QuestionLog.asked_at >= since)
+            if unanswered_only:
+                query = query.filter(QuestionLog.unanswered == True)
+            rows = query.order_by(QuestionLog.asked_at.asc()).all()
+            return [
+                {
+                    'id': r.id,
+                    'asked_at': r.asked_at.isoformat() if r.asked_at else None,
+                    'session_key': r.session_key,
+                    'channel': r.channel,
+                    'question': r.question,
+                    'unanswered': r.unanswered,
+                    'segment': r.segment,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching question log: {e}")
+            return []
         finally:
             session.close()
 

@@ -148,6 +148,12 @@ DEFLECTION = (
     "you can reach them at peopleandculture@recykal.com."
 )
 
+# Internal-only tag the model prepends when it deflects specifically because
+# the knowledge base has a genuine gap (not a policy-restricted topic like
+# salary/CTC) — stripped before the user ever sees it, used to log the
+# question for the unanswered-questions report.
+UNANSWERED_MARKER = "[UNANSWERED]"
+
 # Shown once, appended to a brand-new user's first reply only.
 FIRST_MESSAGE_DISCLAIMER = (
     "\n\n_Just so you know: this chat is for general guidance, not an official "
@@ -165,9 +171,12 @@ single source of truth.
 - NEVER invent, guess, estimate, or "fill in" details that are not explicitly in the \
 KNOWLEDGE BASE — not even plausible-sounding ones (numbers, dates, policies, names, links).
 - If the answer is not clearly in the KNOWLEDGE BASE, do NOT attempt an answer. Instead say, \
-warmly and in your own words, exactly this idea: "{DEFLECTION}"
+warmly and in your own words, exactly this idea: "{DEFLECTION}" — and because this specific case \
+is a genuine knowledge-base gap (not one of the NEVER ANSWER topics below), begin your reply with \
+the exact text {UNANSWERED_MARKER} as the very first characters, before anything else. This tag is \
+invisible to the user and stripped automatically — never mention it, explain it, or apologize for it.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
-deflect. Accuracy matters more than being helpful.
+deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
 
 ################  NEVER ANSWER THESE (always deflect to People & Culture)  ################
 Even if related info appears in the KNOWLEDGE BASE, do not give individualized answers on:
@@ -177,7 +186,9 @@ Even if related info appears in the KNOWLEDGE BASE, do not give individualized a
 - Interpretation of an individual's offer letter
 - Legal or medical advice
 - Exceptions to any policy
-For these, use the deflection to the People & Culture team.
+For these, use the deflection to the People & Culture team — but do NOT use the {UNANSWERED_MARKER} \
+tag here, even if the topic also happens to be missing from the KNOWLEDGE BASE. That tag is reserved \
+for genuine knowledge-base gaps, not policy-restricted topics you'd deflect on regardless.
 
 ################  STYLE  ################
 - Warm, human, and genuinely welcoming — like a friendly P&C colleague, not a form or a bot.
@@ -449,8 +460,10 @@ def save_media(phone: str, media: list[dict]) -> list[dict]:
     return saved
 
 
-def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> str:
-    """Call DeepSeek with retrieved KB context + candidate profile + recent history."""
+def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+    """Call DeepSeek with retrieved KB context + candidate profile + recent
+    history. Returns (reply_text, unanswered) — unanswered is True only when
+    the model tagged this as a genuine knowledge-base gap (see UNANSWERED_MARKER)."""
     messages = [{"role": "system", "content": build_system_prompt(kb_context, profile_block, segment)}]
     messages.extend(user_data["history"][-MAX_HISTORY:])
     try:
@@ -469,13 +482,17 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
             timeout=30,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        unanswered = text.startswith(UNANSWERED_MARKER)
+        if unanswered:
+            text = text[len(UNANSWERED_MARKER):].lstrip()
+        return text, unanswered
     except Exception as e:
         logger.error(f"LLM error: {e}")
         return (
             "Sorry, I glitched for a second there — could you send that again? "
             "I'm here to help with your Recykal onboarding."
-        )
+        ), False
 
 
 @app.get("/whatsapp")
@@ -555,7 +572,10 @@ async def whatsapp_webhook(request: Request):
 
         kb_context = retrieve_context(retrieval_query, segment)
         user_data["history"].append({"role": "user", "content": user_turn})
-        reply = generate_reply(user_data, kb_context, profile_block, segment)
+        reply, unanswered = generate_reply(user_data, kb_context, profile_block, segment)
+        if not media:
+            # Document-upload turns are synthetic, not a real question — skip logging those.
+            upload_manager.log_question(phone, "whatsapp", incoming_message, unanswered, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
         if show_disclaimer:
@@ -616,7 +636,8 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         kb_context = retrieve_context(retrieval_query, segment)
 
         user_data["history"].append({"role": "user", "content": message})
-        reply = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
+        reply, unanswered = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
+        upload_manager.log_question(session_key, "web", message, unanswered, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
         if show_disclaimer:
