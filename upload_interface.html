@@ -439,6 +439,63 @@
             opacity: 0.6;
         }
 
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .modal-box {
+            background: white;
+            border-radius: 10px;
+            width: 100%;
+            max-width: 700px;
+            max-height: 85vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .modal-header h3 {
+            color: #333;
+            font-size: 18px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            line-height: 1;
+            color: #999;
+            cursor: pointer;
+            padding: 0 4px;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        .modal-box .chat-log {
+            margin: 20px;
+            margin-top: 15px;
+            flex: 1;
+            height: auto;
+            min-height: 200px;
+        }
+
         .chat-input-row {
             display: flex;
             gap: 10px;
@@ -537,13 +594,13 @@
 
                 <!-- Tabs -->
                 <div class="tabs">
-                    <button class="tab-button active staff-only-tab" data-tab="upload" onclick="switchTab('upload')">📤 Upload Files</button>
-                    <button class="tab-button staff-only-tab" data-tab="text" onclick="switchTab('text')">📝 Add Text Content</button>
-                    <button class="tab-button staff-only-tab" data-tab="history" onclick="switchTab('history')">📋 Upload History</button>
-                    <button class="tab-button staff-only-tab" data-tab="knowledge" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
+                    <button class="tab-button active admin-only-tab" data-tab="upload" onclick="switchTab('upload')">📤 Upload Files</button>
+                    <button class="tab-button admin-only-tab" data-tab="text" onclick="switchTab('text')">📝 Add Text Content</button>
+                    <button class="tab-button admin-only-tab" data-tab="history" onclick="switchTab('history')">📋 Upload History</button>
+                    <button class="tab-button admin-only-tab" data-tab="knowledge" onclick="switchTab('knowledge')">🗂️ Knowledge Base</button>
                     <button class="tab-button" data-tab="chat" onclick="switchTab('chat')">💬 Try the Bot</button>
-                    <button class="tab-button staff-only-tab" data-tab="outreach" onclick="switchTab('outreach')">📣 Outreach</button>
-                    <button class="tab-button staff-only-tab" data-tab="pilots" onclick="switchTab('pilots')">🧪 Pilot Users</button>
+                    <button class="tab-button admin-only-tab" data-tab="outreach" onclick="switchTab('outreach')">📣 Outreach</button>
+                    <button class="tab-button admin-only-tab" data-tab="users" onclick="switchTab('users')">👥 Users</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -680,32 +737,43 @@
                     </div>
                 </div>
 
-                <!-- Pilot Users Tab -->
-                <div id="pilotsTab" class="tab-content">
-                    <div id="pilotsAlert"></div>
+                <!-- Users Tab -->
+                <div id="usersTab" class="tab-content">
+                    <div id="usersAlert"></div>
                     <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
                         Chat-only accounts for real employees/candidates trying the bot.
-                        Pilot accounts can only use the "Try the Bot" tab — no knowledge-base
+                        These accounts can only use the "Try the Bot" tab — no knowledge-base
                         edit access, no outreach. Share the username/password with them directly.
                     </p>
 
                     <div class="form-group">
-                        <label for="pilotFullname">Full name</label>
-                        <input type="text" id="pilotFullname" placeholder="e.g., Priya Sharma">
+                        <label for="newUserFullname">Full name</label>
+                        <input type="text" id="newUserFullname" placeholder="e.g., Priya Sharma">
                     </div>
                     <div class="form-group">
-                        <label for="pilotUsername">Username</label>
-                        <input type="text" id="pilotUsername" placeholder="e.g., priya.pilot">
+                        <label for="newUserUsername">Username</label>
+                        <input type="text" id="newUserUsername" placeholder="e.g., priya.sharma">
                     </div>
                     <div class="form-group">
-                        <label for="pilotPassword">Password</label>
-                        <input type="password" id="pilotPassword" placeholder="At least 6 characters">
+                        <label for="newUserPassword">Password</label>
+                        <input type="password" id="newUserPassword" placeholder="At least 6 characters">
                     </div>
-                    <button type="button" class="button" id="createPilotBtn" style="width:auto;" onclick="createPilotUser()">Create Pilot Account</button>
+                    <button type="button" class="button" id="createUserBtn" style="width:auto;" onclick="createUser()">Create User Account</button>
 
-                    <div id="pilotUserList" style="margin-top: 20px;"></div>
+                    <div id="userList" style="margin-top: 20px;"></div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Chat transcript viewer (admin) -->
+    <div class="modal-overlay" id="chatViewModal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3 id="chatViewTitle">Chat history</h3>
+                <button type="button" class="modal-close" onclick="closeChatViewModal()">&times;</button>
+            </div>
+            <div class="chat-log" id="chatViewLog"></div>
         </div>
     </div>
 
@@ -721,9 +789,9 @@
             const savedToken = localStorage.getItem('chatbot_token');
             if (savedUser && savedToken) {
                 currentUser = JSON.parse(savedUser);
-                if (!currentUser.role) currentUser.role = 'staff'; // sessions saved before roles existed
+                if (!currentUser.role) currentUser.role = 'admin'; // sessions saved before roles existed
                 showUploadInterface();
-                if (currentUser.role === 'staff') loadUploadHistory();
+                if (currentUser.role === 'admin') loadUploadHistory();
             }
 
             // File upload events
@@ -829,13 +897,13 @@
                 const data = await response.json();
 
                 if (response.ok && data.success) {
-                    currentUser = { username: data.username, role: data.role || 'staff' };
+                    currentUser = { username: data.username, role: data.role || 'admin' };
                     localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
                     localStorage.setItem('chatbot_token', data.access_token);
                     showAlert('loginAlert', 'Login successful!', 'success');
                     setTimeout(() => {
                         showUploadInterface();
-                        if (currentUser.role === 'staff') loadUploadHistory();
+                        if (currentUser.role === 'admin') loadUploadHistory();
                     }, 500);
                 } else {
                     showAlert('loginAlert', data.error || 'Invalid username or password', 'error');
@@ -875,12 +943,12 @@
                     const loginResp = await fetch('/login', { method: 'POST', body: loginData });
                     const loginResult = await loginResp.json();
                     if (loginResp.ok && loginResult.success) {
-                        currentUser = { username: loginResult.username, role: loginResult.role || 'staff' };
+                        currentUser = { username: loginResult.username, role: loginResult.role || 'admin' };
                         localStorage.setItem('chatbot_user', JSON.stringify(currentUser));
                         localStorage.setItem('chatbot_token', loginResult.access_token);
                         setTimeout(() => {
                             showUploadInterface();
-                            if (currentUser.role === 'staff') loadUploadHistory();
+                            if (currentUser.role === 'admin') loadUploadHistory();
                         }, 500);
                     }
                 } else {
@@ -933,11 +1001,11 @@
             document.getElementById('uploadSection').style.display = 'block';
             document.getElementById('currentUser').textContent = currentUser.username || currentUser.email;
 
-            const isPilot = currentUser.role === 'pilot';
-            document.querySelectorAll('.staff-only-tab').forEach(el => {
-                el.style.display = isPilot ? 'none' : '';
+            const isRegularUser = currentUser.role === 'user';
+            document.querySelectorAll('.admin-only-tab').forEach(el => {
+                el.style.display = isRegularUser ? 'none' : '';
             });
-            if (isPilot) {
+            if (isRegularUser) {
                 switchTab('chat');
             }
         }
@@ -967,8 +1035,8 @@
             if (tab === 'outreach') {
                 loadCandidates();
             }
-            if (tab === 'pilots') {
-                loadPilotUsers();
+            if (tab === 'users') {
+                loadUsers();
             }
         }
 
@@ -1378,54 +1446,54 @@
             }
         }
 
-        // Pilot user management (staff only)
-        async function createPilotUser() {
-            const fullname = document.getElementById('pilotFullname').value.trim();
-            const username = document.getElementById('pilotUsername').value.trim();
-            const password = document.getElementById('pilotPassword').value;
+        // User management (admin only)
+        async function createUser() {
+            const fullname = document.getElementById('newUserFullname').value.trim();
+            const username = document.getElementById('newUserUsername').value.trim();
+            const password = document.getElementById('newUserPassword').value;
 
             if (!username || !password) {
-                showAlert('pilotsAlert', 'Username and password are required', 'error');
+                showAlert('usersAlert', 'Username and password are required', 'error');
                 return;
             }
             if (password.length < 6) {
-                showAlert('pilotsAlert', 'Password must be at least 6 characters', 'error');
+                showAlert('usersAlert', 'Password must be at least 6 characters', 'error');
                 return;
             }
 
-            const btn = document.getElementById('createPilotBtn');
+            const btn = document.getElementById('createUserBtn');
             btn.disabled = true;
             btn.textContent = 'Creating...';
 
             try {
-                const response = await authedFetch('/pilot-users', {
+                const response = await authedFetch('/users', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ fullname, username, password })
                 });
                 const data = await response.json();
                 if (response.ok && data.success) {
-                    showAlert('pilotsAlert', `Pilot account "${username}" created — share these credentials with them directly.`, 'success');
-                    document.getElementById('pilotFullname').value = '';
-                    document.getElementById('pilotUsername').value = '';
-                    document.getElementById('pilotPassword').value = '';
-                    loadPilotUsers();
+                    showAlert('usersAlert', `User account "${username}" created — share these credentials with them directly.`, 'success');
+                    document.getElementById('newUserFullname').value = '';
+                    document.getElementById('newUserUsername').value = '';
+                    document.getElementById('newUserPassword').value = '';
+                    loadUsers();
                 } else {
-                    showAlert('pilotsAlert', data.error || 'Could not create pilot account', 'error');
+                    showAlert('usersAlert', data.error || 'Could not create user account', 'error');
                 }
             } catch (error) {
-                showAlert('pilotsAlert', 'Error creating pilot account: ' + error.message, 'error');
+                showAlert('usersAlert', 'Error creating user account: ' + error.message, 'error');
             } finally {
                 btn.disabled = false;
-                btn.textContent = 'Create Pilot Account';
+                btn.textContent = 'Create User Account';
             }
         }
 
-        function loadPilotUsers() {
-            authedFetch('/pilot-users')
+        function loadUsers() {
+            authedFetch('/users')
                 .then(response => response.json())
                 .then(data => {
-                    const div = document.getElementById('pilotUserList');
+                    const div = document.getElementById('userList');
                     if (data.users && data.users.length > 0) {
                         div.innerHTML = data.users.map(u => `
                             <div class="file-item">
@@ -1436,35 +1504,67 @@
                                         ${u.last_login ? 'last active ' + new Date(u.last_login).toLocaleString() : 'never logged in'}
                                     </div>
                                 </div>
-                                <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px; color:#e74c3c;"
-                                    onclick="revokePilotUser('${u.username}')">
-                                    Revoke
-                                </button>
+                                <div style="display:flex; gap:8px;">
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px;"
+                                        onclick="viewUserChat('${u.username}')">
+                                        View Chat
+                                    </button>
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px; color:#e74c3c;"
+                                        onclick="revokeUser('${u.username}')">
+                                        Revoke
+                                    </button>
+                                </div>
                             </div>
                         `).join('');
                     } else {
-                        div.innerHTML = '<p style="color:#999; text-align:center;">No pilot accounts yet.</p>';
+                        div.innerHTML = '<p style="color:#999; text-align:center;">No user accounts yet.</p>';
                     }
                 })
                 .catch(error => {
-                    console.error('Error loading pilot users:', error);
-                    showAlert('pilotsAlert', 'Could not load pilot accounts', 'error');
+                    console.error('Error loading users:', error);
+                    showAlert('usersAlert', 'Could not load user accounts', 'error');
                 });
         }
 
-        function revokePilotUser(username) {
-            if (!confirm(`Revoke pilot access for "${username}"?`)) return;
-            authedFetch(`/pilot-users/${encodeURIComponent(username)}`, { method: 'DELETE' })
+        function revokeUser(username) {
+            if (!confirm(`Revoke access for "${username}"?`)) return;
+            authedFetch(`/users/${encodeURIComponent(username)}`, { method: 'DELETE' })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        showAlert('pilotsAlert', 'Revoked', 'success');
-                        loadPilotUsers();
+                        showAlert('usersAlert', 'Revoked', 'success');
+                        loadUsers();
                     } else {
-                        showAlert('pilotsAlert', data.error || 'Could not revoke access', 'error');
+                        showAlert('usersAlert', data.error || 'Could not revoke access', 'error');
                     }
                 })
-                .catch(error => showAlert('pilotsAlert', 'Error revoking access: ' + error.message, 'error'));
+                .catch(error => showAlert('usersAlert', 'Error revoking access: ' + error.message, 'error'));
+        }
+
+        function viewUserChat(username) {
+            authedFetch(`/users/${encodeURIComponent(username)}/chat`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('chatViewTitle').textContent = `Chat history — ${username}`;
+                    const log = document.getElementById('chatViewLog');
+                    const history = (data.history || []).filter(m => m.role === 'user' || m.role === 'assistant');
+                    if (history.length === 0) {
+                        log.innerHTML = '<p style="color:#999; text-align:center;">No messages yet.</p>';
+                    } else {
+                        log.innerHTML = history.map(m => `
+                            <div class="chat-bubble ${m.role === 'user' ? 'user' : 'bot'}">${
+                                m.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                            }</div>
+                        `).join('');
+                    }
+                    document.getElementById('chatViewModal').style.display = 'flex';
+                    log.scrollTop = log.scrollHeight;
+                })
+                .catch(error => showAlert('usersAlert', 'Could not load chat history: ' + error.message, 'error'));
+        }
+
+        function closeChatViewModal() {
+            document.getElementById('chatViewModal').style.display = 'none';
         }
 
         // Utility functions

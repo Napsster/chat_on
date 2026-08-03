@@ -27,7 +27,7 @@ from vector_store import VectorStore
 from lookup_store import CandidateDirectory, normalize_phone
 from google_drive_sync import GoogleDriveSync
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
-from auth import init_auth, create_token, get_current_user, require_staff
+from auth import init_auth, create_token, get_current_user, require_admin
 
 logging.basicConfig(
     level=logging.INFO,
@@ -763,7 +763,7 @@ async def login(
                 "success": True,
                 "message": message,
                 "username": username,
-                "role": user["role"] if user else "staff",
+                "role": user["role"] if user else "admin",
                 "access_token": token,
                 "token_type": "bearer"
             })
@@ -785,7 +785,7 @@ async def login(
 async def upload_files(
     request: Request,
     audience: str = Form('both'),
-    current_user: dict = Depends(require_staff)
+    current_user: dict = Depends(require_admin)
 ):
     """Upload files to the chatbot. audience: 'pre_join'/'post_join'/'both' —
     which segment(s) of users these files' content should be visible to."""
@@ -872,7 +872,7 @@ async def upload_files(
 
 
 @app.post("/upload/text")
-async def upload_text(request: Request, current_user: dict = Depends(require_staff)):
+async def upload_text(request: Request, current_user: dict = Depends(require_admin)):
     """Upload text content as markdown"""
     try:
         data = await request.json()
@@ -922,7 +922,7 @@ async def upload_text(request: Request, current_user: dict = Depends(require_sta
 
 
 @app.get("/upload/history")
-async def get_upload_history(current_user: dict = Depends(require_staff)):
+async def get_upload_history(current_user: dict = Depends(require_admin)):
     """Get upload history for the logged-in user"""
     try:
         history = upload_manager.get_upload_history(current_user["username"])
@@ -941,7 +941,7 @@ async def get_upload_history(current_user: dict = Depends(require_staff)):
 
 
 @app.get("/knowledge/documents")
-async def list_knowledge_documents(current_user: dict = Depends(require_staff)):
+async def list_knowledge_documents(current_user: dict = Depends(require_admin)):
     """List every document contributing to (or retired from) the bot's knowledge base"""
     try:
         docs = upload_manager.list_knowledge_documents()
@@ -954,7 +954,7 @@ async def list_knowledge_documents(current_user: dict = Depends(require_staff)):
 
 
 @app.post("/knowledge/documents/{doc_id}/toggle")
-async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), current_user: dict = Depends(require_staff)):
+async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), current_user: dict = Depends(require_admin)):
     """Activate or deactivate a knowledge document without deleting it"""
     try:
         success, message = upload_manager.set_knowledge_document_active(doc_id, active)
@@ -968,7 +968,7 @@ async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), curre
 
 
 @app.post("/knowledge/documents/{doc_id}/audience")
-async def set_knowledge_document_audience(doc_id: int, audience: str = Form(...), current_user: dict = Depends(require_staff)):
+async def set_knowledge_document_audience(doc_id: int, audience: str = Form(...), current_user: dict = Depends(require_admin)):
     """Re-tag which segment(s) a knowledge document is visible to"""
     try:
         success, message = upload_manager.set_knowledge_document_audience(doc_id, audience)
@@ -982,7 +982,7 @@ async def set_knowledge_document_audience(doc_id: int, audience: str = Form(...)
 
 
 @app.delete("/knowledge/documents/{doc_id}")
-async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(require_staff)):
+async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(require_admin)):
     """Permanently remove a knowledge document"""
     try:
         success, message = upload_manager.delete_knowledge_document(doc_id)
@@ -1000,7 +1000,7 @@ async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(re
 # ============================================================================
 
 @app.get("/candidates")
-async def list_candidates(current_user: dict = Depends(require_staff)):
+async def list_candidates(current_user: dict = Depends(require_admin)):
     """List candidates from the onboarding log (if one is configured), each
     flagged with whether they've ever messaged the bot — a rough signal for
     whether a free-form update would actually be deliverable (WhatsApp only
@@ -1039,7 +1039,7 @@ async def list_candidates(current_user: dict = Depends(require_staff)):
 
 
 @app.post("/candidates/send-welcome")
-async def send_welcome_messages(request: Request, current_user: dict = Depends(require_staff)):
+async def send_welcome_messages(request: Request, current_user: dict = Depends(require_admin)):
     """Bulk-send the approved welcome template. Works regardless of the 24h
     window — that's the point of using a template. content_variables sends
     {"1": first_name} to match the template's first placeholder; adjust to
@@ -1066,7 +1066,7 @@ async def send_welcome_messages(request: Request, current_user: dict = Depends(r
 
 
 @app.post("/candidates/send-update")
-async def send_update_messages(request: Request, current_user: dict = Depends(require_staff)):
+async def send_update_messages(request: Request, current_user: dict = Depends(require_admin)):
     """Bulk-send a free-form update. Only actually reaches people who
     messaged the bot within the last 24h — WhatsApp rejects free-form sends
     outside that window regardless of what this code does."""
@@ -1090,56 +1090,70 @@ async def send_update_messages(request: Request, current_user: dict = Depends(re
 
 
 # ============================================================================
-# PILOT USER MANAGEMENT (staff-only — chat-only accounts for a real pilot)
+# USER MANAGEMENT (admin-only — chat-only 'user' accounts for real employees/
+# candidates trying the bot, plus visibility into what they're asking it)
 # ============================================================================
 
-@app.post("/pilot-users")
-async def create_pilot_user(request: Request, current_user: dict = Depends(require_staff)):
-    """Create a chat-only account for a pilot participant. Share the
-    username/password with them out of band (email, WhatsApp, etc.) — there's
-    no self-service signup for this role, staff creates it deliberately."""
+@app.post("/users")
+async def create_user(request: Request, current_user: dict = Depends(require_admin)):
+    """Create a chat-only 'user' account. Share the username/password with
+    them out of band (email, WhatsApp, etc.) — there's no self-service
+    signup for this role, an admin creates it deliberately."""
     try:
         data = await request.json()
         username = (data.get("username") or "").strip()
         password = data.get("password") or ""
         fullname = (data.get("fullname") or "").strip()
-        email = (data.get("email") or f"{username}@pilot.local").strip()
+        email = (data.get("email") or f"{username}@users.local").strip()
 
         if not username or not password:
             return JSONResponse({"error": "username and password are required"}, status_code=400)
 
         success, message = upload_manager.register_user(
-            username=username, email=email, password=password, fullname=fullname, role='pilot'
+            username=username, email=email, password=password, fullname=fullname, role='user'
         )
         if success:
             return JSONResponse({"success": True, "message": message})
         return JSONResponse({"success": False, "error": message}, status_code=400)
     except Exception as e:
-        logger.error(f"Create pilot user error: {e}")
+        logger.error(f"Create user error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.get("/pilot-users")
-async def list_pilot_users(current_user: dict = Depends(require_staff)):
-    """List current pilot accounts"""
+@app.get("/users")
+async def list_regular_users(current_user: dict = Depends(require_admin)):
+    """List chat-only 'user' accounts"""
     try:
-        users = upload_manager.list_users(role='pilot')
+        users = upload_manager.list_users(role='user')
         return JSONResponse({"success": True, "users": users})
     except Exception as e:
-        logger.error(f"List pilot users error: {e}")
+        logger.error(f"List users error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-@app.delete("/pilot-users/{username}")
-async def revoke_pilot_user(username: str, current_user: dict = Depends(require_staff)):
-    """Revoke a pilot participant's access"""
+@app.delete("/users/{username}")
+async def revoke_user(username: str, current_user: dict = Depends(require_admin)):
+    """Revoke a user account's access"""
     try:
         success, message = upload_manager.delete_user_by_username(username)
         if not success:
             return JSONResponse({"success": False, "error": message}, status_code=404)
         return JSONResponse({"success": True})
     except Exception as e:
-        logger.error(f"Revoke pilot user error: {e}")
+        logger.error(f"Revoke user error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/users/{username}/chat")
+async def get_user_chat_transcript(username: str, current_user: dict = Depends(require_admin)):
+    """Admin-only: read a user's web-chat conversation history — the same
+    session storage /chat itself reads and writes, just for a given username
+    instead of the currently-authenticated one."""
+    try:
+        data = get_user_data(f"web-{username}")
+        return JSONResponse({"success": True, "history": data.get("history", [])})
+    except Exception as e:
+        logger.error(f"Get user chat transcript error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
 

@@ -32,9 +32,9 @@ class User(Base):
     fullname = Column(String(200))
     created_at = Column(DateTime, default=datetime.utcnow)
     last_login = Column(DateTime)
-    # 'staff' (full tool access) or 'pilot' (chat-only — for real employees/
+    # 'admin' (full tool access) or 'user' (chat-only — for real employees/
     # candidates trying the bot without knowledge-base edit or outreach access)
-    role = Column(String(20), default='staff', nullable=False)
+    role = Column(String(20), default='admin', nullable=False)
 
 class Upload(Base):
     """Upload history model"""
@@ -118,13 +118,22 @@ class FileUploadManager:
             user_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(users)"))]
             if user_cols and 'role' not in user_cols:
                 conn.execute(text(
-                    "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'staff' NOT NULL"
+                    "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'admin' NOT NULL"
                 ))
                 conn.commit()
-                logger.info("Migrated users: added role column (default 'staff' — existing accounts keep full access)")
+                logger.info("Migrated users: added role column (default 'admin' — existing accounts keep full access)")
+
+            # One-time rename from the earlier staff/pilot naming — safe to run
+            # every startup, becomes a no-op once nothing's left to rename.
+            if user_cols:
+                renamed_admin = conn.execute(text("UPDATE users SET role = 'admin' WHERE role = 'staff'")).rowcount
+                renamed_user = conn.execute(text("UPDATE users SET role = 'user' WHERE role = 'pilot'")).rowcount
+                if renamed_admin or renamed_user:
+                    conn.commit()
+                    logger.info(f"Migrated users: renamed {renamed_admin} 'staff'->'admin', {renamed_user} 'pilot'->'user' role value(s)")
 
     # User Authentication Methods
-    def register_user(self, username: str, email: str, password: str, fullname: str = "", role: str = 'staff') -> Tuple[bool, str]:
+    def register_user(self, username: str, email: str, password: str, fullname: str = "", role: str = 'admin') -> Tuple[bool, str]:
         """
         Register a new user
 
@@ -133,13 +142,13 @@ class FileUploadManager:
             email: Email address
             password: Plain text password
             fullname: User's full name
-            role: 'staff' (full tool access, default) or 'pilot' (chat-only)
+            role: 'admin' (full tool access, default) or 'user' (chat-only)
 
         Returns:
             Tuple of (success, message)
         """
-        if role not in ('staff', 'pilot'):
-            role = 'staff'
+        if role not in ('admin', 'user'):
+            role = 'admin'
         session = self.Session()
         try:
             # Check if user exists

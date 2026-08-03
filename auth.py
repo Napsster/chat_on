@@ -56,10 +56,10 @@ def get_current_user(creds: HTTPAuthorizationCredentials = Depends(bearer)) -> d
     return user
 
 
-def require_staff(user: dict = Depends(get_current_user)) -> dict:
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
     """Gate for anything beyond chatting — knowledge-base management,
-    outreach, pilot-user administration. Pilot accounts (real employees/
+    outreach, user administration. Regular 'user' accounts (real employees/
     candidates trying the bot) never see any of it."""
-    if user.get("role") != "staff":
-        raise HTTPException(status_code=403, detail="Staff access required")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
     return user
