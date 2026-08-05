@@ -1,11 +1,36 @@
 # Local Development Setup
 
+## Setting Up on a New Machine
+
+To move this project to a different laptop, clone from GitHub rather than
+copy-pasting the folder — `venv/` is built for a specific OS/CPU and won't
+transfer, and the local checkout usually has test data mixed in
+(`data/users/*.json`, `chatbot.db`, `uploads/*`) that shouldn't travel with it.
+
+```bash
+git clone <repo-url> chatbot-local
+cd chatbot-local
+```
+
+Then carry over exactly one file by hand — **`.env`** (gitignored, holds
+secrets — copy it directly via AirDrop/USB/secure notes, not through chat or
+any channel that logs plaintext). Everything else regenerates on first run.
+
+Optional, only if you want continuity with the old machine's data:
+- `chatbot.db` — existing user accounts, uploaded knowledge documents, question logs
+- `data/users/*.json` — real (non-test) WhatsApp conversation history
+
+Requires **Python 3.10+** (developed/tested on 3.12) — the code uses
+`X | None` union syntax and fastembed/numpy 2.x, which need it.
+
+Then follow Quick Start below.
+
 ## Quick Start (5 minutes)
 
 ### 1. Set Up Virtual Environment
 
 ```bash
-cd /home/user/chatbot-local
+cd chatbot-local
 
 # Create virtual environment
 python3 -m venv venv
@@ -24,15 +49,18 @@ pip install -r requirements.txt
 
 ```bash
 mkdir -p uploads
-mkdir -p knowledge
 ```
 
 ### 4. Create .env File
 
 ```bash
 cp .env.example .env
-# Edit .env if needed (usually defaults work for local dev)
 ```
+
+Fill in at minimum `DEEPSEEK_API_KEY` (required — `/whatsapp` and `/chat`
+replies fail without it) and `JWT_SECRET` (falls back to an insecure
+placeholder if unset — fine to skip only for a throwaway local test).
+Everything else in `.env.example` is optional and dormant until configured.
 
 ### 5. Run the Chatbot
 
@@ -158,6 +186,30 @@ git add .
 git commit -m "your message"
 git push origin claude/html-mockup-internal-screens-mhyf46
 ```
+
+---
+
+## Email Reports (Optional)
+
+`reports.py` is a standalone script, not part of the running server — it's
+meant to be invoked by cron, and loads its own `.env` (cron doesn't inherit
+the systemd service's environment). Dormant until `SMTP_HOST`,
+`SMTP_USERNAME`, and `SMTP_PASSWORD` are set in `.env`.
+
+```bash
+# Daily digest of that day's unanswered questions, once at end of day
+crontab -e
+# add:
+55 23 * * * cd /path/to/chatbot-local && ./venv/bin/python reports.py --daily
+
+# Weekly digest of repeated questions (semantic clustering, trailing 7 days)
+0 9 * * 1 cd /path/to/chatbot-local && ./venv/bin/python reports.py --weekly
+```
+
+Use absolute paths in the crontab entry — cron's working directory isn't the
+repo, and `reports.py` resolves `.env`/`knowledge*.md` relative to its own
+file location, not the cron shell's cwd. Test manually first with
+`./venv/bin/python reports.py --daily` before trusting the schedule.
 
 ---
 

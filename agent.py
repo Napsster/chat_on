@@ -190,6 +190,25 @@ For these, use the deflection to the People & Culture team — but do NOT use th
 tag here, even if the topic also happens to be missing from the KNOWLEDGE BASE. That tag is reserved \
 for genuine knowledge-base gaps, not policy-restricted topics you'd deflect on regardless.
 
+################  AMBIGUOUS TERMS — READ CAREFULLY  ################
+Some words the KNOWLEDGE BASE uses for more than one distinct process mean different things \
+depending on context. The clearest example: "ticket" could mean an IT support ticket (helpdesk \
+portal, laptop/access/password issues) or a travel ticket/booking (flights/trains via the Travel \
+Desk) — these are two completely different processes with different portals and different \
+contacts. This isn't a fixed list — apply the same rule to any term you notice covers more than \
+one KNOWLEDGE BASE topic, not just "ticket".
+
+STOP before answering any question involving a term like this and check: does the conversation \
+so far (this message or an earlier one) contain a specific clue pointing to ONE of the meanings — \
+a mentioned trip/travel dates, a laptop/password/access problem, etc.?
+- YES, there's a clue → answer using that specific process only. Don't make them repeat what \
+they already told you, and don't mention the other meaning at all.
+- NO clue either way → do NOT answer yet, and do NOT pick the one that comes to mind first \
+(e.g. IT is not a "default" — it is exactly as likely as the other meaning). Instead, your ENTIRE \
+reply must be a short clarifying question and nothing else — no partial answer, no information \
+from either process, no links, no portal names. For example: "Just to check — do you mean an IT \
+support ticket, or a travel booking? 😊" Wait for their answer before saying anything substantive.
+
 ################  STYLE  ################
 - Warm, human, and genuinely welcoming — like a friendly P&C colleague, not a form or a bot.
 - Professional and trustworthy. Vary your phrasing; never sound scripted or repetitive.
@@ -247,6 +266,18 @@ def build_system_prompt(kb_context: str, profile_block: str | None = None, segme
         + "\n################  END OF KNOWLEDGE BASE  ################"
     )
     return "\n\n".join(parts)
+
+
+RETRIEVAL_CONTEXT_TURNS = 3  # how many recent user messages feed into the search query
+
+
+def recent_user_context(history: list[dict], n: int = RETRIEVAL_CONTEXT_TURNS) -> str:
+    """Last n user messages, oldest first — richer signal for retrieval than
+    just the immediately-previous turn, so a word like "ticket" (IT support
+    vs. travel booking — two different KB sections) can be disambiguated by
+    something mentioned a turn or two earlier, not just the last message."""
+    user_turns = [m["content"] for m in history if m["role"] == "user"]
+    return " ".join(user_turns[-n:])
 
 
 def retrieve_context(query: str, segment: str | None = None) -> str:
@@ -562,13 +593,8 @@ async def whatsapp_webhook(request: Request):
             )
             retrieval_query = f"{caption} document upload onboarding verification".strip()
         else:
-            prev_user = next(
-                (m["content"] for m in reversed(user_data["history"])
-                 if m["role"] == "user"),
-                "",
-            )
             user_turn = incoming_message
-            retrieval_query = f"{prev_user} {incoming_message}".strip()
+            retrieval_query = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
 
         kb_context = retrieve_context(retrieval_query, segment)
         user_data["history"].append({"role": "user", "content": user_turn})
@@ -628,11 +654,7 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         else:
             segment, should_ask_segment = resolve_segment(None, user_data, message)
 
-        prev_user = next(
-            (m["content"] for m in reversed(user_data["history"]) if m["role"] == "user"),
-            "",
-        )
-        retrieval_query = f"{prev_user} {message}".strip()
+        retrieval_query = f"{recent_user_context(user_data['history'])} {message}".strip()
         kb_context = retrieve_context(retrieval_query, segment)
 
         user_data["history"].append({"role": "user", "content": message})

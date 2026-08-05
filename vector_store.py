@@ -43,7 +43,15 @@ def _chunk_markdown(text: str) -> list[str]:
             flush()
             section = m.group(1).strip()
             continue
-        if p in ("---", "```"):
+        if re.match(r"^-{3,}$", p):
+            # Horizontal rule — in this source content it marks a page break,
+            # which is a real topic boundary often enough that blending
+            # across it hurts retrieval (two unrelated topics landing in one
+            # chunk dilutes the embedding so neither scores well). Flush
+            # instead of silently absorbing it into the current chunk.
+            flush()
+            continue
+        if p == "```":
             continue
         p = p.strip("`").strip()
         if not p:
