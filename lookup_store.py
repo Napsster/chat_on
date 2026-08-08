@@ -34,7 +34,8 @@ REFRESH_TTL = 300  # seconds (for the CSV URL)
 # Status-column values → segment. Substring match against the lowercased cell.
 POST_JOIN_STATUS_MARKERS = ("joined", "active", "onboarded", "working", "employee")
 PRE_JOIN_STATUS_MARKERS = (
-    "yet to join", "not joined", "pending", "offer", "upcoming", "candidate", "in progress"
+    "yet to join", "not joined", "pending", "offer", "upcoming", "candidate", "in progress",
+    "accepted",
 )
 
 _DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%m/%d/%Y", "%d %b %Y", "%d %B %Y")
