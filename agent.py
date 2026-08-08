@@ -38,6 +38,24 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Recykal Onboarding Agent")
 
 APP_DIR = Path(__file__).parent
+
+
+def _load_env_file(path: Path):
+    """Minimal KEY=VALUE loader (no python-dotenv dependency). Uses setdefault
+    so real process env vars — e.g. the systemd unit's Environment= lines in
+    production — always take precedence over .env."""
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_env_file(APP_DIR / ".env")
+
 IS_LOCAL = os.getenv('IS_LOCAL', 'true').lower() == 'true'
 PROJECT_DIR = str(APP_DIR) if IS_LOCAL else "/home/chetan/apps/onboarding-agent"
 
