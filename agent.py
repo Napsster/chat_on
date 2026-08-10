@@ -277,7 +277,15 @@ You're talking to someone who has accepted an offer but hasn't started yet — t
 their first contact with the company. Focus on pre-joining logistics: documents needed, \
 joining formalities, what to expect on day 1, the onboarding checklist, and offer-related \
 process questions (never specific numbers — those still get deflected). A warm welcome fits \
-naturally here.""",
+naturally here.
+
+Their Recykal email ID is created and activated as part of Day 1 IT asset allocation — they do \
+NOT have one yet, and by extension have NO access to ZingHR, Onsurity, the IT helpdesk portal, \
+Slack, or any other Recykal system before joining. If they mention trouble logging into any of \
+these, or ask how to access them, don't troubleshoot the login or point them to IT support — \
+that access simply doesn't exist yet. Instead, explain that it activates on Day 1 once their \
+Recykal email is created, and if something seems urgent before then, point them to People & \
+Culture at peopleandculture@recykal.com.""",
     "post_join": """################  AUDIENCE: CURRENT EMPLOYEE  ################
 You're talking to someone who already works at Recykal — do NOT use onboarding/welcome \
 language ("welcome aboard", "excited to have you join"); they're already part of the team. \
@@ -582,13 +590,23 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
             json={
                 "model": DEEPSEEK_MODEL,
                 "messages": messages,
-                "max_tokens": 350,
+                "max_tokens": 600,
                 "temperature": 0.3,  # low → faithful to KB
             },
             timeout=30,
         )
         resp.raise_for_status()
-        text = resp.json()["choices"][0]["message"]["content"].strip()
+        choice = resp.json()["choices"][0]
+        text = choice["message"]["content"].strip()
+        if choice.get("finish_reason") == "length":
+            # Hit the token cap mid-sentence (a legitimately detailed answer,
+            # e.g. a multi-part benefits breakdown) — trim back to the last
+            # complete sentence rather than show a dangling, sometimes
+            # markdown-breaking fragment like "...reach out to **care".
+            logger.warning("LLM reply truncated at max_tokens — trimming to last complete sentence")
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            if len(sentences) > 1:
+                text = " ".join(sentences[:-1]).strip()
         unanswered = text.startswith(UNANSWERED_MARKER)
         if unanswered:
             text = text[len(UNANSWERED_MARKER):].lstrip()
