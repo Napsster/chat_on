@@ -336,20 +336,39 @@ def recent_user_context(history: list[dict], n: int = RETRIEVAL_CONTEXT_TURNS) -
     return " ".join(user_turns[-n:])
 
 
-def retrieve_context(query: str, segment: str | None = None) -> str:
+def retrieve_context(message: str, segment: str | None = None, extra_query: str | None = None) -> str:
     """Top-k relevant chunks via vector memory; full KB as fallback. segment
-    ('pre_join'/'post_join'/None) picks which knowledge base to search."""
+    ('pre_join'/'post_join'/None) picks which knowledge base to search.
+
+    Retrieves on the bare `message` alone, and — if `extra_query` (typically
+    the message blended with a turn or two of recent conversation, via
+    recent_user_context) differs — retrieves on that too, then merges both
+    result sets (dedup, message-alone ranked first). Blended context helps
+    disambiguate a term like "ticket" using something said a turn earlier,
+    but when the user cleanly switches topics it can just as easily drown
+    out a strong direct match on the new message with leftover signal from
+    whatever was being discussed before — retrieving on the message alone
+    as well guards against that."""
     if segment == "pre_join":
         vstore, base = VSTORE_PRE_JOIN, KNOWLEDGE_BASE_PRE_JOIN
     elif segment == "post_join":
         vstore, base = VSTORE_POST_JOIN, KNOWLEDGE_BASE_POST_JOIN
     else:
         vstore, base = VSTORE, KNOWLEDGE_BASE
-    if vstore.ready:
-        chunks = vstore.retrieve(query, k=TOP_K)
-        if chunks:
-            return "\n\n---\n\n".join(chunks)
-    return base
+    if not vstore.ready:
+        return base
+
+    seen: set[str] = set()
+    merged: list[str] = []
+    queries = [message]
+    if extra_query and extra_query != message:
+        queries.append(extra_query)
+    for q in queries:
+        for c in vstore.retrieve(q, k=TOP_K):
+            if c not in seen:
+                seen.add(c)
+                merged.append(c)
+    return "\n\n---\n\n".join(merged) if merged else base
 
 
 # --- Segment (pre_join / post_join) resolution ------------------------------
@@ -647,12 +666,12 @@ async def whatsapp_webhook(request: Request):
                 f"Do NOT greet from scratch or ask them to re-send. If appropriate, "
                 f"mention any remaining onboarding steps from the knowledge base.]"
             )
-            retrieval_query = f"{caption} document upload onboarding verification".strip()
+            retrieval_message = f"{caption} document upload onboarding verification".strip()
+            kb_context = retrieve_context(retrieval_message, segment)
         else:
             user_turn = incoming_message
-            retrieval_query = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
-
-        kb_context = retrieve_context(retrieval_query, segment)
+            blended = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
+            kb_context = retrieve_context(incoming_message, segment, extra_query=blended)
         user_data["history"].append({"role": "user", "content": user_turn})
         reply, unanswered = generate_reply(user_data, kb_context, profile_block, segment)
         if not media:
@@ -710,8 +729,8 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         else:
             segment, should_ask_segment = resolve_segment(None, user_data, message)
 
-        retrieval_query = f"{recent_user_context(user_data['history'])} {message}".strip()
-        kb_context = retrieve_context(retrieval_query, segment)
+        blended = f"{recent_user_context(user_data['history'])} {message}".strip()
+        kb_context = retrieve_context(message, segment, extra_query=blended)
 
         user_data["history"].append({"role": "user", "content": message})
         reply, unanswered = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
