@@ -600,7 +600,10 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
                 "model": DEEPSEEK_MODEL,
                 "messages": messages,
                 "max_tokens": 600,
-                "temperature": 0.3,  # low → faithful to KB
+                "temperature": 0.1,  # low → faithful to KB; 0.3 produced live inconsistency —
+                # same query, empty history, identical retrieved context still swung between a
+                # correct direct answer, an unnecessary clarifying question, and (once) a
+                # completely unrelated tangent about IT-vs-travel "tickets"
             },
             # 30s (calibrated for the old 350-token cap) was timing out live
             # once max_tokens went to 600 — longer generations take longer.
