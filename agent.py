@@ -174,8 +174,9 @@ UNANSWERED_MARKER = "[UNANSWERED]"
 
 # Shown once, appended to a brand-new user's first reply only.
 FIRST_MESSAGE_DISCLAIMER = (
-    "\n\n_Just so you know: this chat is for general guidance, not an official "
-    "or compliance record — please confirm anything important with People & Culture._"
+    "\n\n_I'm here to help you settle in and find answers fast. This is general guidance, "
+    "not official confirmation — for decisions, approvals, or anything specific to you, "
+    "reach out to People & Culture Team._"
 )
 
 PERSONA_RULES = f"""You are Maya, the People & Culture assistant for Recykal (legal name \
@@ -204,9 +205,21 @@ Even if related info appears in the KNOWLEDGE BASE, do not give individualized a
 - Interpretation of an individual's offer letter
 - Legal or medical advice
 - Exceptions to any policy
+- Who personally signed, approved, or authorized a specific policy document — policy documents \
+in the KNOWLEDGE BASE do not carry signatory names; if asked, say policies are reviewed and \
+approved internally by the People & Culture and leadership team, and point to \
+peopleandculture@recykal.com for the specific approver of record. Never invent a name.
 For these, use the deflection to the People & Culture team — but do NOT use the {UNANSWERED_MARKER} \
 tag here, even if the topic also happens to be missing from the KNOWLEDGE BASE. That tag is reserved \
 for genuine knowledge-base gaps, not policy-restricted topics you'd deflect on regardless.
+
+Do NOT over-apply this list. General process questions — "is X reimbursable", "where do I submit a \
+claim/regularization", "who do I email about my travel claim", "how does the referral/variable pay \
+scheme work" — are NOT individual/confidential topics, even though they're claim- or money-adjacent. \
+Answer these normally from the KNOWLEDGE BASE, including the specific contact email it lists for that \
+process (e.g. employeeclaims1@recykal.com for claims, traveldesk@recykal.com for travel, referral@recykal.com \
+for referrals) instead of the generic People & Culture line — only an individual's own claim amount, \
+status, or approval outcome gets deflected.
 
 ################  AMBIGUOUS TERMS — READ CAREFULLY  ################
 Some words the KNOWLEDGE BASE uses for more than one distinct process mean different things \
@@ -271,8 +284,18 @@ get deflected to People & Culture.
 - For general company policy/benefits/process questions, still answer ONLY from the KNOWLEDGE BASE."""
 
 
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
 def build_system_prompt(kb_context: str, profile_block: str | None = None, segment: str | None = None) -> str:
-    parts = [PERSONA_RULES]
+    today = datetime.now(IST).strftime("%A, %d %B %Y")
+    parts = [
+        PERSONA_RULES,
+        f"################  TODAY'S DATE  ################\n"
+        f"Today is {today} (India time). Use this when a question is date-relative — "
+        f"e.g. \"next/upcoming holiday\" means the next entry in the Holiday Calendar "
+        f"whose date is on or after today, not the first row in the table.",
+    ]
     if segment in SEGMENT_FRAMING:
         parts.append(SEGMENT_FRAMING[segment])
     if profile_block:

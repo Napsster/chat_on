@@ -51,6 +51,13 @@ def _chunk_markdown(text: str) -> list[str]:
             # instead of silently absorbing it into the current chunk.
             flush()
             continue
+        if re.match(r"^-{3,}\n.*\n-{3,}$", p, re.S):
+            # YAML frontmatter block (source_type/source_url/audience/etc.)
+            # inserted by the extraction pipeline — provenance metadata, not
+            # answerable content. Left in, it becomes its own low-signal
+            # chunk that can crowd out the real content in top-k retrieval.
+            flush()
+            continue
         if p == "```":
             continue
         p = p.strip("`").strip()
