@@ -439,6 +439,46 @@
             opacity: 0.6;
         }
 
+        .chat-bubble .md-table-wrap {
+            overflow-x: auto;
+            margin: 6px 0;
+            max-width: 100%;
+        }
+
+        .chat-bubble .md-table {
+            border-collapse: collapse;
+            font-size: 13px;
+            white-space: normal;
+        }
+
+        .chat-bubble .md-table th,
+        .chat-bubble .md-table td {
+            border: 1px solid #ddd;
+            padding: 4px 8px;
+            text-align: left;
+        }
+
+        .chat-bubble .md-table th {
+            background: #f5f5f7;
+        }
+
+        .chat-bubble a {
+            color: #667eea;
+            word-break: break-all;
+        }
+
+        .chat-bubble.user a {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .chat-bubble code {
+            background: rgba(0, 0, 0, 0.06);
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
         .modal-overlay {
             display: none;
             position: fixed;
@@ -1262,20 +1302,83 @@
                 .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         }
 
-        // Minimal, safe markdown-ish rendering for bot replies: escape first
-        // (neutralizes any real HTML/script), then convert just the markdown
-        // the bot actually uses (links, bold, bullets, line breaks) — not a
-        // full markdown parser, but covers what the persona prompt produces.
-        // Links are restricted to http(s)/mailto so escaping can't be
-        // bypassed via a javascript: URL slipped into link syntax.
-        function renderMarkdown(text) {
-            let html = escapeHtml(text);
-            html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
+        // Safe markdown-ish rendering for bot replies: escape first
+        // (neutralizes any real HTML/script), then render just the markdown
+        // constructs the bot's KB-grounded replies actually produce — links,
+        // bold/italic, inline code, headings, bullet/numbered lists, and
+        // pipe tables (KB documents are full of these; an unrendered table
+        // shows up as a garbled wall of "|" and "-" characters). Not a full
+        // markdown parser, but covers what shows up in practice. Links are
+        // restricted to http(s)/mailto so escaping can't be bypassed via a
+        // javascript: URL slipped into link syntax.
+        function renderInline(escapedText) {
+            let s = escapedText;
+            s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
                 '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-            html = html.replace(/^[-*]\s+(.+)$/gm, '• $1');
-            html = html.replace(/\n/g, '<br>');
-            return html;
+            s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+            s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            s = s.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
+            return s;
+        }
+
+        function isTableRow(line) {
+            const t = line.trim();
+            return t.length > 1 && t.startsWith('|') && t.endsWith('|');
+        }
+
+        function isTableSeparator(line) {
+            return isTableRow(line) && /^\|[\s:-]+(\|[\s:-]+)*\|$/.test(line.trim());
+        }
+
+        function splitTableRow(line) {
+            return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+        }
+
+        function renderTable(headerCells, bodyRows) {
+            const thead = '<tr>' + headerCells.map(c => `<th>${renderInline(c)}</th>`).join('') + '</tr>';
+            const tbody = bodyRows.map(row =>
+                '<tr>' + row.map(c => `<td>${renderInline(c)}</td>`).join('') + '</tr>'
+            ).join('');
+            return `<div class="md-table-wrap"><table class="md-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table></div>`;
+        }
+
+        function renderMarkdown(text) {
+            const lines = escapeHtml(text).split('\n');
+            const blocks = [];
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i];
+
+                if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1])) {
+                    const headerCells = splitTableRow(line);
+                    i += 2;
+                    const bodyRows = [];
+                    while (i < lines.length && isTableRow(lines[i])) {
+                        bodyRows.push(splitTableRow(lines[i]));
+                        i++;
+                    }
+                    blocks.push(renderTable(headerCells, bodyRows));
+                    continue;
+                }
+
+                const heading = line.match(/^(#{1,6})\s+(.+)$/);
+                if (heading) {
+                    blocks.push('<strong>' + renderInline(heading[2]) + '</strong>');
+                    i++;
+                    continue;
+                }
+
+                const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+                if (bullet) {
+                    blocks.push('• ' + renderInline(bullet[1]));
+                    i++;
+                    continue;
+                }
+
+                blocks.push(renderInline(line));
+                i++;
+            }
+            return blocks.join('<br>');
         }
 
         function appendChatBubble(role, text, pending) {
