@@ -593,7 +593,9 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
                 "max_tokens": 600,
                 "temperature": 0.3,  # low → faithful to KB
             },
-            timeout=30,
+            # 30s (calibrated for the old 350-token cap) was timing out live
+            # once max_tokens went to 600 — longer generations take longer.
+            timeout=60,
         )
         resp.raise_for_status()
         choice = resp.json()["choices"][0]
