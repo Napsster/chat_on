@@ -1257,14 +1257,39 @@
         }
 
         // Chat functions
+        function escapeHtml(text) {
+            return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        // Minimal, safe markdown-ish rendering for bot replies: escape first
+        // (neutralizes any real HTML/script), then convert just the markdown
+        // the bot actually uses (links, bold, bullets, line breaks) — not a
+        // full markdown parser, but covers what the persona prompt produces.
+        // Links are restricted to http(s)/mailto so escaping can't be
+        // bypassed via a javascript: URL slipped into link syntax.
+        function renderMarkdown(text) {
+            let html = escapeHtml(text);
+            html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
+                '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+            html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+            html = html.replace(/^[-*]\s+(.+)$/gm, '• $1');
+            html = html.replace(/\n/g, '<br>');
+            return html;
+        }
+
         function appendChatBubble(role, text, pending) {
             const log = document.getElementById('chatLog');
             const bubble = document.createElement('div');
             bubble.className = 'chat-bubble ' + role + (pending ? ' pending' : '');
-            bubble.textContent = text;
+            setChatBubbleText(bubble, role, text);
             log.appendChild(bubble);
             log.scrollTop = log.scrollHeight;
             return bubble;
+        }
+
+        function setChatBubbleText(bubble, role, text) {
+            bubble.innerHTML = role === 'user' ? escapeHtml(text) : renderMarkdown(text);
         }
 
         async function sendChatMessage(event) {
@@ -1288,13 +1313,13 @@
 
                 pending.classList.remove('pending');
                 if (response.ok && data.reply) {
-                    pending.textContent = data.reply;
+                    setChatBubbleText(pending, 'bot', data.reply);
                 } else {
-                    pending.textContent = 'Error: ' + (data.error || 'Something went wrong');
+                    setChatBubbleText(pending, 'bot', 'Error: ' + (data.error || 'Something went wrong'));
                 }
             } catch (error) {
                 pending.classList.remove('pending');
-                pending.textContent = 'Error: ' + error.message;
+                setChatBubbleText(pending, 'bot', 'Error: ' + error.message);
             }
 
             document.getElementById('chatLog').scrollTop = document.getElementById('chatLog').scrollHeight;
@@ -1553,7 +1578,7 @@
                     } else {
                         log.innerHTML = history.map(m => `
                             <div class="chat-bubble ${m.role === 'user' ? 'user' : 'bot'}">${
-                                m.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                                m.role === 'user' ? escapeHtml(m.content) : renderMarkdown(m.content)
                             }</div>
                         `).join('');
                     }
