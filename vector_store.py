@@ -38,6 +38,22 @@ def _chunk_markdown(text: str) -> list[str]:
     # chunk's embedding enough that retrieval never surfaces it even for an
     # exact-phrase query.
     text = re.sub(r"\[(CLARIFIED|CORRECTED)\b[^\]]*\]", lambda m: f"\n\n{m.group(0)}\n\n", text)
+    # Drop fully-blank table rows (every cell empty/whitespace, e.g.
+    # "|  |  |  |  |") — a common Google Docs table-export artifact, most
+    # of them spacer rows inside otherwise-real SOP/policy tables. They
+    # carry zero information but sit at the START of many small per-row
+    # table chunks, and that leading boilerplate dilutes the chunk's
+    # embedding enough to outrank genuinely relevant content (e.g. it beat
+    # out the actual leadership-team chunk for a "tell me about the
+    # management" query). The separator row ("| :-: | :-: |") is untouched
+    # since ":-:" isn't whitespace.
+    text = re.sub(r"(?m)^\|(?:\s*\|)+\s*$\n?", "", text)
+    # Same reasoning for the alignment/separator row itself (e.g.
+    # "| :-: | :-: | :-: | :-: |") — pure table syntax, no information, and
+    # it's the very first line of many small per-row SOP-table chunks
+    # (26-onboarding-sop.md alone has ~16 of these), so its removal matters
+    # more than its short length suggests.
+    text = re.sub(r"(?m)^\|(?:[\s:-]*\|)+\s*$\n?", "", text)
     section = "Recykal Onboarding"
     paragraphs = re.split(r"\n\s*\n", text)
     chunks: list[str] = []
