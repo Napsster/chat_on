@@ -22,6 +22,22 @@ EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 
 def _chunk_markdown(text: str) -> list[str]:
     """Split into section-aware chunks, prefixing each with its source header."""
+    # Strip each file's YAML frontmatter block (source_type/source_url/
+    # audience/corrections/etc.) at the text level, anchored to right after
+    # its "## File:" heading. Anchoring here (rather than detecting it later
+    # per-paragraph) avoids it ever getting split apart by the correction-
+    # annotation isolation below — some of these frontmatter blocks describe
+    # the [CLARIFIED ...]/[CORRECTED ...] convention in prose, which would
+    # otherwise get matched and split mid-block, leaking metadata fragments
+    # into real chunks.
+    text = re.sub(r"(##\s*File:[^\n]*\n\n)-{3,}\n.*?\n-{3,}\n", r"\1", text, flags=re.S)
+    # Isolate inline correction annotations (e.g. "[CLARIFIED 2026-08-07:
+    # there is no hybrid working model...]") into their own paragraph before
+    # chunking. Left inline, a short but important fact gets buried inside
+    # whatever slide bullet/paragraph it was appended to, diluting that
+    # chunk's embedding enough that retrieval never surfaces it even for an
+    # exact-phrase query.
+    text = re.sub(r"\[(CLARIFIED|CORRECTED)\b[^\]]*\]", lambda m: f"\n\n{m.group(0)}\n\n", text)
     section = "Recykal Onboarding"
     paragraphs = re.split(r"\n\s*\n", text)
     chunks: list[str] = []
@@ -67,7 +83,30 @@ def _chunk_markdown(text: str) -> list[str]:
             flush()
         buf = f"{buf}\n{p}" if buf else p
     flush()
-    return [c for c in chunks if len(c) > 20]
+    return _dedupe_near_identical([c for c in chunks if len(c) > 20])
+
+
+_SOURCE_PREFIX = re.compile(r"^\[Source:[^\]]*\]\n")
+
+
+def _dedupe_near_identical(chunks: list[str]) -> list[str]:
+    """Boilerplate legal/scope paragraphs (e.g. "For the purposes of this
+    Policy, Recykal/Company includes...") get copy-pasted near-verbatim into
+    a dozen-plus policy documents. Each copy embeds to nearly the same
+    vector, so for many unrelated queries several near-identical copies can
+    occupy multiple top-k slots at once — wasted slots that push out the
+    chunk that's actually relevant. Keep the first occurrence of each
+    (source-stripped, whitespace/case-normalized) chunk body, drop repeats."""
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for c in chunks:
+        body = _SOURCE_PREFIX.sub("", c)
+        norm = re.sub(r"\s+", " ", body).strip().lower()
+        if norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(c)
+    return deduped
 
 
 # Shared across all VectorStore instances/rebuilds — loading the ONNX model is
