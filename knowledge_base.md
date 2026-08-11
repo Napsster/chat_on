@@ -17,12 +17,6 @@ Folder structure:
 
 ---
 
-## File: Recykal CXO / Leadership Team (curated)
-
-Recykal's leadership team has exactly 7 CXOs: 1. Abhay Deshpande — Founder & CEO. 2. Abhishek Deshpande — Co-Founder & Chief Operating Officer (COO). 3. Anirudha Jalan — Co-Founder & Chief Strategy Officer (CSO). 4. Ekta Narain — Co-Founder & Chief Business & Impact Officer (CBIO). 5. Vikram Prabakar — Co-Founder & Chief Product & Technology Officer (CPTO). 6. Sujan Parthasaradhi — Co-Founder & Chief Innovation Officer (CIO). 7. Vijay Vanparthi — Chief Financial Officer (CFO).
-
----
-
 ## File: Whatsapp chatbot
 
 Type: Google Sheet Drive ID: 1MVMJsi6EQ7H8v2FAoFJTVKdYelvRFlQFKXSPYtsU\_ao Location: root of shared folder
