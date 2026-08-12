@@ -38,6 +38,7 @@ wheels/
 .env
 .env.local
 .env.*.local
+deploy.local.env
 
 # Uploads directory (but keep structure)
 uploads/*
