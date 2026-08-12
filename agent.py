@@ -11,6 +11,8 @@ import os
 import re
 import json
 import time
+import hmac
+import hashlib
 import logging
 import mimetypes
 from pathlib import Path
@@ -481,6 +483,12 @@ def touch_last_message(user_data: dict):
     user_data["last_message_at"] = datetime.now(timezone.utc).isoformat()
 
 
+# --- WhatsApp provider selection --------------------------------------------
+# "twilio" (default) or "meta" — switches both the /whatsapp webhook format
+# and the outbound send path below. Only one is active per deployment; the
+# other's code stays dormant (same "unless configured" pattern as before).
+WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "twilio").strip().lower()
+
 # --- Media (document upload) handling, WhatsApp side -----------------------
 TWILIO_SID = os.environ.get("TWILIO_ACCOUNT_SID")
 TWILIO_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
@@ -504,7 +512,7 @@ def get_twilio_client():
     return _twilio_client
 
 
-def send_whatsapp_template(to_phone: str, content_variables: dict | None = None) -> tuple[bool, str]:
+def send_whatsapp_template_twilio(to_phone: str, content_variables: dict | None = None) -> tuple[bool, str]:
     """Send the approved welcome template — works even if the recipient has
     never messaged the bot before (exempt from the 24h window)."""
     client = get_twilio_client()
@@ -526,7 +534,7 @@ def send_whatsapp_template(to_phone: str, content_variables: dict | None = None)
         return False, str(e)
 
 
-def send_whatsapp_freeform(to_phone: str, body: str) -> tuple[bool, str]:
+def send_whatsapp_freeform_twilio(to_phone: str, body: str) -> tuple[bool, str]:
     """Send a plain message — only deliverable if the recipient messaged the
     bot within the last 24h; Twilio will reject it otherwise."""
     client = get_twilio_client()
@@ -545,7 +553,7 @@ def send_whatsapp_freeform(to_phone: str, body: str) -> tuple[bool, str]:
         return False, str(e)
 
 
-def parse_media(form) -> list[dict]:
+def parse_media_twilio(form) -> list[dict]:
     """Extract media items from a Twilio webhook form."""
     try:
         n = int(form.get("NumMedia", "0") or "0")
@@ -559,7 +567,7 @@ def parse_media(form) -> list[dict]:
     return items
 
 
-def save_media(phone: str, media: list[dict]) -> list[dict]:
+def save_media_twilio(phone: str, media: list[dict]) -> list[dict]:
     """Best-effort download of uploaded files (Twilio media needs basic auth)."""
     safe = re.sub(r"[^0-9]", "", phone) or "unknown"
     outdir = UPLOAD_MEDIA_DIR / safe
@@ -581,6 +589,181 @@ def save_media(phone: str, media: list[dict]) -> list[dict]:
             logger.warning(f"Could not download media from {phone}: {e}")
         saved.append(rec)
     return saved
+
+
+# --- Meta WhatsApp Cloud API (direct, no Twilio/WATI in between) -----------
+# Active only when WHATSAPP_PROVIDER=meta. META_ACCESS_TOKEN should be a
+# permanent System User token (not the 24h test token from the App
+# dashboard's Quick Start) — that one expires and will silently break
+# sending. META_APP_SECRET enables verifying that inbound webhooks actually
+# came from Meta (X-Hub-Signature-256); without it verification is skipped
+# (fine for local dev, not for production). META_VERIFY_TOKEN is a string
+# you invent yourself and enter in the App dashboard's webhook setup — Meta
+# echoes it back on the one-time GET verification handshake.
+META_GRAPH_VERSION = os.environ.get("META_GRAPH_API_VERSION", "v21.0")
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN", "")
+META_PHONE_NUMBER_ID = os.environ.get("META_PHONE_NUMBER_ID", "")
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "")
+META_VERIFY_TOKEN = os.environ.get("META_VERIFY_TOKEN", "")
+META_WELCOME_TEMPLATE_NAME = os.environ.get("META_WELCOME_TEMPLATE_NAME", "")
+META_WELCOME_TEMPLATE_LANG = os.environ.get("META_WELCOME_TEMPLATE_LANG", "en_US")
+META_GRAPH_BASE = f"https://graph.facebook.com/{META_GRAPH_VERSION}"
+
+
+def _meta_headers() -> dict:
+    return {"Authorization": f"Bearer {META_ACCESS_TOKEN}", "Content-Type": "application/json"}
+
+
+def _meta_error_detail(e: Exception) -> str:
+    resp = getattr(e, "response", None)
+    return resp.text if resp is not None else str(e)
+
+
+def verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool:
+    """Verify X-Hub-Signature-256 against META_APP_SECRET. Skipped (returns
+    True) when no app secret is configured — dev-only, tighten before prod."""
+    if not META_APP_SECRET:
+        return True
+    if not signature_header or not signature_header.startswith("sha256="):
+        return False
+    expected = hmac.new(META_APP_SECRET.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, signature_header.split("=", 1)[1])
+
+
+def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict]] | None:
+    """Extract (phone, text, media_items) from a Cloud API webhook payload.
+    Returns None for events with nothing to react to — delivery/read status
+    callbacks arrive on the same webhook and carry no "messages" key."""
+    try:
+        value = payload["entry"][0]["changes"][0]["value"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    messages = value.get("messages")
+    if not messages:
+        return None
+    msg = messages[0]
+    phone = "+" + re.sub(r"\D", "", msg.get("from", ""))
+    msg_type = msg.get("type", "text")
+    media = []
+    if msg_type == "text":
+        text = (msg.get("text", {}).get("body") or "").strip()
+    else:
+        sub = msg.get(msg_type, {}) or {}
+        text = (sub.get("caption") or "").strip()
+        if sub.get("id"):
+            media.append({"id": sub["id"], "content_type": sub.get("mime_type", "")})
+    return phone, text, media
+
+
+def save_media_meta(phone: str, media: list[dict]) -> list[dict]:
+    """Resolve each Meta media ID to a short-lived URL, then download it
+    (Bearer auth, unlike Twilio's basic auth)."""
+    safe = re.sub(r"[^0-9]", "", phone) or "unknown"
+    outdir = UPLOAD_MEDIA_DIR / safe
+    outdir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for i, m in enumerate(media):
+        rec = {"url": None, "content_type": m.get("content_type", ""), "file": None,
+               "received_at": int(time.time())}
+        try:
+            lookup = requests.get(f"{META_GRAPH_BASE}/{m['id']}", headers=_meta_headers(), timeout=15)
+            lookup.raise_for_status()
+            media_url = lookup.json()["url"]
+            rec["url"] = media_url
+            r = requests.get(media_url, headers={"Authorization": f"Bearer {META_ACCESS_TOKEN}"}, timeout=30)
+            r.raise_for_status()
+            ext = mimetypes.guess_extension((rec["content_type"] or "").split(";")[0]) or ""
+            fname = f"{rec['received_at']}_{i}{ext}"
+            (outdir / fname).write_bytes(r.content)
+            rec["file"] = str(outdir / fname)
+            logger.info(f"📎 Saved upload from {phone}: {fname} ({rec['content_type']})")
+        except Exception as e:
+            logger.warning(f"Could not download Meta media from {phone}: {e}")
+        saved.append(rec)
+    return saved
+
+
+def send_meta_text(to_phone: str, body: str) -> tuple[bool, str]:
+    """Send a plain message via the Graph API — only deliverable within 24h
+    of the recipient's last message; Meta will reject it otherwise."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return False, "Meta Cloud API not configured (META_ACCESS_TOKEN/META_PHONE_NUMBER_ID missing)"
+    try:
+        r = requests.post(
+            f"{META_GRAPH_BASE}/{META_PHONE_NUMBER_ID}/messages",
+            headers=_meta_headers(),
+            json={
+                "messaging_product": "whatsapp",
+                "to": re.sub(r"\D", "", to_phone),
+                "type": "text",
+                "text": {"body": body},
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True, r.json().get("messages", [{}])[0].get("id", "")
+    except Exception as e:
+        return False, _meta_error_detail(e)
+
+
+def send_meta_template(to_phone: str, content_variables: dict | None = None) -> tuple[bool, str]:
+    """Send the approved welcome template — works even if the recipient has
+    never messaged the bot before (exempt from the 24h window). Variables
+    are sent as positional body params ({{1}}, {{2}}...), ordered by key —
+    match this to however the approved template numbers its placeholders."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return False, "Meta Cloud API not configured (META_ACCESS_TOKEN/META_PHONE_NUMBER_ID missing)"
+    if not META_WELCOME_TEMPLATE_NAME:
+        return False, "No welcome template configured (set META_WELCOME_TEMPLATE_NAME once one is approved)"
+    components = []
+    if content_variables:
+        ordered = [content_variables[k] for k in sorted(content_variables, key=str)]
+        components.append({
+            "type": "body",
+            "parameters": [{"type": "text", "text": str(v)} for v in ordered],
+        })
+    try:
+        r = requests.post(
+            f"{META_GRAPH_BASE}/{META_PHONE_NUMBER_ID}/messages",
+            headers=_meta_headers(),
+            json={
+                "messaging_product": "whatsapp",
+                "to": re.sub(r"\D", "", to_phone),
+                "type": "template",
+                "template": {
+                    "name": META_WELCOME_TEMPLATE_NAME,
+                    "language": {"code": META_WELCOME_TEMPLATE_LANG},
+                    "components": components,
+                },
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True, r.json().get("messages", [{}])[0].get("id", "")
+    except Exception as e:
+        return False, _meta_error_detail(e)
+
+
+# --- Provider-agnostic entry points -----------------------------------------
+# Everything outside this block (outreach endpoints, /health) calls these —
+# they dispatch to whichever provider WHATSAPP_PROVIDER selects.
+
+def send_whatsapp_template(to_phone: str, content_variables: dict | None = None) -> tuple[bool, str]:
+    if WHATSAPP_PROVIDER == "meta":
+        return send_meta_template(to_phone, content_variables)
+    return send_whatsapp_template_twilio(to_phone, content_variables)
+
+
+def send_whatsapp_freeform(to_phone: str, body: str) -> tuple[bool, str]:
+    if WHATSAPP_PROVIDER == "meta":
+        return send_meta_text(to_phone, body)
+    return send_whatsapp_freeform_twilio(to_phone, body)
+
+
+def _welcome_template_configured() -> bool:
+    if WHATSAPP_PROVIDER == "meta":
+        return bool(META_WELCOME_TEMPLATE_NAME)
+    return bool(TWILIO_WELCOME_TEMPLATE_SID)
 
 
 def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
@@ -633,18 +816,55 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
         ), False
 
 
+def whatsapp_reply(phone: str, text: str) -> Response:
+    """Deliver a reply and return the HTTP response the webhook itself
+    should send. Twilio expects the reply inline as TwiML; Meta's Cloud API
+    has no such mechanism — the webhook response must just be a bare 200,
+    and the reply is a separate authenticated call to the Graph API."""
+    if WHATSAPP_PROVIDER == "meta":
+        ok, detail = send_meta_text(phone, text)
+        if not ok:
+            logger.error(f"Meta send failed to {phone}: {detail}")
+        return Response(content="", status_code=200)
+    resp = MessagingResponse()
+    resp.message(text)
+    return Response(content=str(resp), media_type="application/xml")
+
+
 @app.get("/whatsapp")
-async def whatsapp_webhook_get():
+async def whatsapp_webhook_get(request: Request):
+    if WHATSAPP_PROVIDER == "meta":
+        params = request.query_params
+        if (
+            META_VERIFY_TOKEN
+            and params.get("hub.mode") == "subscribe"
+            and params.get("hub.verify_token") == META_VERIFY_TOKEN
+        ):
+            return Response(content=params.get("hub.challenge", ""), status_code=200)
+        return Response(content="", status_code=403)
     return Response(content="", status_code=200)
 
 
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
+    phone = None
     try:
-        form_data = await request.form()
-        phone = form_data.get("From", "").replace("whatsapp:", "")
-        incoming_message = (form_data.get("Body", "") or "").strip()
-        media = parse_media(form_data)
+        if WHATSAPP_PROVIDER == "meta":
+            raw_body = await request.body()
+            if not verify_meta_signature(raw_body, request.headers.get("X-Hub-Signature-256")):
+                logger.warning("Rejected /whatsapp webhook: bad Meta signature")
+                return Response(content="", status_code=403)
+            parsed = parse_incoming_meta(json.loads(raw_body))
+            if parsed is None:
+                # Delivery/read status callback, or a payload with nothing to
+                # react to — acknowledge and move on, there's no reply to send.
+                return Response(content="", status_code=200)
+            phone, incoming_message, media = parsed
+        else:
+            form_data = await request.form()
+            phone = form_data.get("From", "").replace("whatsapp:", "")
+            incoming_message = (form_data.get("Body", "") or "").strip()
+            media = parse_media_twilio(form_data)
 
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
 
@@ -674,9 +894,7 @@ async def whatsapp_webhook(request: Request):
             user_data["history"].append({"role": "assistant", "content": reply})
             touch_last_message(user_data)
             save_user_data(phone, user_data)
-            resp = MessagingResponse()
-            resp.message(reply)
-            return Response(content=str(resp), media_type="application/xml")
+            return whatsapp_reply(phone, reply)
 
         # opportunistic email capture
         if incoming_message and not user_data.get("email"):
@@ -686,7 +904,7 @@ async def whatsapp_webhook(request: Request):
 
         # Handle uploaded documents: save them and build a turn the LLM can act on.
         if media:
-            saved = save_media(phone, media)
+            saved = save_media_meta(phone, media) if WHATSAPP_PROVIDER == "meta" else save_media_twilio(phone, media)
             user_data.setdefault("documents", []).extend(saved)
             types = ", ".join(sorted({(s["content_type"] or "file").split("/")[0] for s in saved}))
             caption = incoming_message or ""
@@ -717,14 +935,20 @@ async def whatsapp_webhook(request: Request):
         touch_last_message(user_data)
         save_user_data(phone, user_data)
 
-        resp = MessagingResponse()
-        resp.message(reply)
-        return Response(content=str(resp), media_type="application/xml")
+        return whatsapp_reply(phone, reply)
 
     except Exception as e:
         logger.error(f"ERROR in webhook: {e}")
+        apology = "Sorry, something hiccuped on my end. Mind sending that again?"
+        if WHATSAPP_PROVIDER == "meta":
+            if phone:
+                try:
+                    send_meta_text(phone, apology)
+                except Exception:
+                    pass
+            return Response(content="", status_code=200)
         resp = MessagingResponse()
-        resp.message("Sorry, something hiccuped on my end. Mind sending that again?")
+        resp.message(apology)
         return Response(content=str(resp), media_type="application/xml")
 
 
@@ -1139,7 +1363,7 @@ async def list_candidates(current_user: dict = Depends(require_admin)):
             return JSONResponse({
                 "success": True,
                 "configured": False,
-                "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
+                "welcome_template_configured": _welcome_template_configured(),
                 "candidates": [],
             })
 
@@ -1159,7 +1383,7 @@ async def list_candidates(current_user: dict = Depends(require_admin)):
         return JSONResponse({
             "success": True,
             "configured": True,
-            "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
+            "welcome_template_configured": _welcome_template_configured(),
             "candidates": candidates,
         })
     except Exception as e:
@@ -1307,9 +1531,12 @@ async def health():
         "candidate_rows": len(DIRECTORY._index),
         "directory_source": DIRECTORY.source,
         "outreach": {
+            "provider": WHATSAPP_PROVIDER,
             "twilio_configured": bool(get_twilio_client()),
-            "welcome_template_configured": bool(TWILIO_WELCOME_TEMPLATE_SID),
-            "sender_configured": bool(TWILIO_WHATSAPP_FROM),
+            "meta_configured": bool(META_ACCESS_TOKEN and META_PHONE_NUMBER_ID),
+            "meta_signature_verification": bool(META_APP_SECRET),
+            "welcome_template_configured": _welcome_template_configured(),
+            "sender_configured": bool(TWILIO_WHATSAPP_FROM) if WHATSAPP_PROVIDER != "meta" else bool(META_PHONE_NUMBER_ID),
         },
         "google_drive_sync": DRIVE_SYNC.get_sync_status(),
         "upload_dir_exists": Path(f"{PROJECT_DIR}/uploads").exists(),
