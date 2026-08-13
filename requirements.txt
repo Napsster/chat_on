@@ -11,3 +11,4 @@ google-api-python-client==2.198.0
 google-auth==2.56.2
 passlib>=1.7
 python-jose[cryptography]>=3.3
+sqlcipher3-binary>=0.5

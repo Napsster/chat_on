@@ -97,6 +97,21 @@ class ChatMessage(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+def _sqlcipher_creator(db_path: str, key: str):
+    """SQLAlchemy create_engine(creator=...) factory — opens the
+    SQLCipher-encrypted db file and unlocks it with the passphrase before
+    SQLAlchemy issues any queries. Only imports sqlcipher3 when actually
+    needed, so environments without DB_ENCRYPTION_KEY set (e.g. a plain
+    local dev db) don't need the package installed at all."""
+    from sqlcipher3 import dbapi2 as sqlcipher
+
+    def creator():
+        conn = sqlcipher.connect(db_path)
+        conn.execute(f"PRAGMA key='{key}'")
+        return conn
+    return creator
+
+
 class FileUploadManager:
     """Manages file uploads and user authentication"""
 
@@ -118,8 +133,14 @@ class FileUploadManager:
         self.db_path = db_path
         self.max_file_size = max_file_size_mb * 1024 * 1024
 
-        # Initialize database
-        self.engine = create_engine(f'sqlite:///{db_path}')
+        # Initialize database — SQLCipher-encrypted if DB_ENCRYPTION_KEY is
+        # set (production), plain SQLite otherwise (local dev, no key configured).
+        db_key = os.environ.get('DB_ENCRYPTION_KEY')
+        if db_key:
+            self.engine = create_engine('sqlite://', creator=_sqlcipher_creator(db_path, db_key))
+            logger.info("Database opened with SQLCipher encryption")
+        else:
+            self.engine = create_engine(f'sqlite:///{db_path}')
         Base.metadata.create_all(self.engine)
         self._migrate_schema()
         self.Session = sessionmaker(bind=self.engine)
