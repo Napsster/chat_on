@@ -74,6 +74,29 @@ class QuestionLog(Base):
     unanswered = Column(Boolean, default=False, nullable=False)
     segment = Column(String(20))  # 'pre_join' / 'post_join' / None at time of asking
 
+class UserSession(Base):
+    """Per-session chat state — one row per WhatsApp phone or web-<username>
+    session. Replaces the old data/users/*.json files' top-level fields
+    (history itself lives in ChatMessage, keyed the same way)."""
+    __tablename__ = "user_sessions"
+
+    session_key = Column(String(200), primary_key=True)
+    email = Column(String(200), nullable=True)
+    segment = Column(String(20), nullable=True)
+    segment_asked = Column(Boolean, default=False, nullable=False)
+    last_message_at = Column(String(50), nullable=True)  # ISO string, matches datetime.fromisoformat() usage in agent.py
+
+class ChatMessage(Base):
+    """One row per chat turn — replaces the JSON 'history' list. Ordered by
+    id for a given session_key to reconstruct the conversation."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True)
+    session_key = Column(String(200), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
 class FileUploadManager:
     """Manages file uploads and user authentication"""
 
@@ -501,6 +524,76 @@ class FileUploadManager:
             session.commit()
         except Exception as e:
             logger.error(f"Error logging question: {e}")
+        finally:
+            session.close()
+
+    def get_user_data(self, session_key: str) -> Dict:
+        """Reconstruct the same dict shape the old data/users/*.json files
+        held: {"phone": ..., "email": ..., "history": [...], "segment": ...,
+        "segment_asked": ..., "last_message_at": ...}. Callers mutate this
+        dict freely, then pass the whole thing back to save_user_data."""
+        session = self.Session()
+        try:
+            row = session.query(UserSession).filter(UserSession.session_key == session_key).first()
+            messages = (
+                session.query(ChatMessage)
+                .filter(ChatMessage.session_key == session_key)
+                .order_by(ChatMessage.id.asc())
+                .all()
+            )
+            history = [{"role": m.role, "content": m.content} for m in messages]
+            if row is None:
+                return {"phone": session_key, "email": None, "history": history}
+            data = {"phone": session_key, "email": row.email, "history": history}
+            if row.segment is not None:
+                data["segment"] = row.segment
+            if row.segment_asked:
+                data["segment_asked"] = row.segment_asked
+            if row.last_message_at:
+                data["last_message_at"] = row.last_message_at
+            return data
+        except Exception as e:
+            logger.error(f"Error reading user session {session_key}: {e}")
+            return {"phone": session_key, "email": None, "history": []}
+        finally:
+            session.close()
+
+    def save_user_data(self, session_key: str, data: Dict) -> None:
+        """Persist the full dict back — upserts the session row, and
+        replaces the message rows wholesale (simple, avoids delta-tracking;
+        realistic history lengths make this cheap)."""
+        session = self.Session()
+        try:
+            row = session.query(UserSession).filter(UserSession.session_key == session_key).first()
+            if row is None:
+                row = UserSession(session_key=session_key)
+                session.add(row)
+            row.email = data.get("email")
+            row.segment = data.get("segment")
+            row.segment_asked = bool(data.get("segment_asked", False))
+            row.last_message_at = data.get("last_message_at")
+
+            session.query(ChatMessage).filter(ChatMessage.session_key == session_key).delete()
+            for m in data.get("history", []):
+                session.add(ChatMessage(session_key=session_key, role=m["role"], content=m["content"]))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error saving user session {session_key}: {e}")
+            session.rollback()
+        finally:
+            session.close()
+
+    def has_messaged(self, session_key: str) -> bool:
+        session = self.Session()
+        try:
+            return session.query(UserSession.session_key).filter(UserSession.session_key == session_key).first() is not None
+        finally:
+            session.close()
+
+    def all_messaged_session_keys(self) -> List[str]:
+        session = self.Session()
+        try:
+            return [r[0] for r in session.query(UserSession.session_key).all()]
         finally:
             session.close()
 

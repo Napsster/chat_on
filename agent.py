@@ -489,16 +489,13 @@ def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: s
 
 
 def get_user_data(phone: str) -> dict:
-    user_file = DATA_DIR / f"{phone}.json"
-    if user_file.exists():
-        with open(user_file) as f:
-            return json.load(f)
-    return {"phone": phone, "email": None, "history": []}
+    """Chat state now lives in the database (user_sessions/chat_messages
+    tables) rather than data/users/*.json — see FileUploadManager.get_user_data."""
+    return upload_manager.get_user_data(phone)
 
 
 def save_user_data(phone: str, data: dict):
-    with open(DATA_DIR / f"{phone}.json", "w") as f:
-        json.dump(data, f, indent=2)
+    upload_manager.save_user_data(phone, data)
 
 
 DISCLAIMER_REPEAT_AFTER = timedelta(hours=24)
@@ -1408,7 +1405,7 @@ async def list_candidates(current_user: dict = Depends(require_admin)):
                 "candidates": [],
             })
 
-        messaged_phones = {normalize_phone(f.stem) for f in DATA_DIR.glob("*.json")}
+        messaged_phones = {normalize_phone(k) for k in upload_manager.all_messaged_session_keys()}
 
         candidates = []
         for entry in DIRECTORY.list_all():
