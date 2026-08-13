@@ -49,6 +49,8 @@ data/users/*
 !data/users/.gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
+data/users_migrated_to_db_*/
+data/users_backup_*/
 
 # Onboarding candidate log (may contain PII) and service account key
 data/onboarding_log.csv
