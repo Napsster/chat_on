@@ -372,11 +372,21 @@
             font-size: 12px;
             font-weight: 600;
             flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .logout-btn:hover {
             background: #e74c3c;
             color: white;
+        }
+
+        /* Icon variants of the logout/send buttons stay hidden until the
+           mobile breakpoint swaps text labels for them to save space. */
+        .logout-btn .icon,
+        .chat-input-row button .icon {
+            display: none;
         }
 
         @media (max-width: 600px) {
@@ -393,9 +403,105 @@
             }
 
             .user-info {
-                flex-direction: column;
-                align-items: flex-start;
+                flex-direction: row;
+                justify-content: flex-end;
+                align-items: center;
                 gap: 10px;
+                padding: 10px 15px;
+            }
+
+            /* "Logged in as ..." text takes up space that mobile chat needs;
+               the logout button alone is enough. */
+            .user-info span {
+                display: none;
+            }
+
+            .logout-btn {
+                width: 36px;
+                height: 36px;
+                padding: 0;
+                border-radius: 50%;
+                justify-content: center;
+            }
+
+            .logout-btn .btn-label {
+                display: none;
+            }
+
+            .logout-btn .icon {
+                display: block;
+            }
+
+            .chat-input-row button {
+                width: 44px;
+                height: 44px;
+                padding: 0;
+                border-radius: 50%;
+                flex-shrink: 0;
+                margin-top: 0;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            .chat-input-row button .btn-label {
+                display: none;
+            }
+
+            .chat-input-row button .icon {
+                display: block;
+            }
+
+            /* Keep the chat entry box + send button on-screen without
+               scrolling: while the chat tab is open, the whole app becomes
+               a viewport-height flex column so the message log is the only
+               part that shrinks/scrolls — the input row always stays put
+               right below it. Scoped to .chat-tab-active (toggled by
+               switchTab()) so other tabs keep their normal page scrolling. */
+            body.app-mode.chat-tab-active .container {
+                display: flex;
+                flex-direction: column;
+                height: 100dvh;
+                max-height: 100dvh;
+            }
+
+            body.app-mode.chat-tab-active .content {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+                overflow: hidden;
+                padding: 12px;
+            }
+
+            body.app-mode.chat-tab-active .upload-section.active {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+            }
+
+            body.app-mode.chat-tab-active .header,
+            body.app-mode.chat-tab-active .user-info,
+            body.app-mode.chat-tab-active .tabs {
+                flex-shrink: 0;
+            }
+
+            body.app-mode.chat-tab-active #chatTab.active {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                min-height: 0;
+            }
+
+            body.app-mode.chat-tab-active #chatTab.active > * {
+                flex-shrink: 0;
+            }
+
+            body.app-mode.chat-tab-active #chatTab.active .chat-log {
+                flex: 1 1 auto;
+                height: auto;
+                min-height: 0;
             }
         }
 
@@ -565,7 +671,6 @@
         <!-- Header -->
         <div class="header">
             <h1>Recykal Buddy</h1>
-            <p>File Upload Portal</p>
         </div>
 
         <!-- Main Content -->
@@ -629,7 +734,10 @@
             <div class="upload-section" id="uploadSection">
                 <div class="user-info">
                     <span>Logged in as: <strong id="currentUser"></strong></span>
-                    <button class="logout-btn" onclick="logout()">Logout</button>
+                    <button class="logout-btn" onclick="logout()" title="Logout" aria-label="Logout">
+                        <svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                        <span class="btn-label">Logout</span>
+                    </button>
                 </div>
 
                 <!-- Tabs -->
@@ -732,7 +840,7 @@
                         actually changed what it answers.
                         <a href="#" onclick="resetChat(); return false;" style="color:#667eea;">Reset conversation</a>
                     </p>
-                    <div class="form-group">
+                    <div class="form-group admin-only-tab">
                         <label for="chatSegment">Preview as</label>
                         <select id="chatSegment">
                             <option value="" selected>Auto (bot asks, like a real user)</option>
@@ -744,7 +852,10 @@
                     <div class="chat-log" id="chatLog"></div>
                     <form class="chat-input-row" id="chatForm" onsubmit="return sendChatMessage(event);">
                         <input type="text" id="chatInput" placeholder="Ask something an employee might ask..." autocomplete="off">
-                        <button type="submit" class="button">Send</button>
+                        <button type="submit" class="button" title="Send" aria-label="Send">
+                            <svg class="icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            <span class="btn-label">Send</span>
+                        </button>
                     </form>
                 </div>
 
@@ -1068,6 +1179,8 @@
             document.getElementById(tab + 'Tab').classList.add('active');
             const btn = document.querySelector(`.tab-button[data-tab="${tab}"]`);
             if (btn) btn.classList.add('active');
+
+            document.body.classList.toggle('chat-tab-active', tab === 'chat');
 
             if (tab === 'chat') {
                 document.getElementById('chatInput').focus();
