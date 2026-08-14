@@ -394,6 +394,18 @@
                 padding: 20px;
             }
 
+            /* The admin tab bar has more buttons than fit a phone screen;
+               let it scroll horizontally instead of overflowing the page. */
+            .tabs {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                min-width: 0;
+            }
+
+            .tab-button {
+                flex-shrink: 0;
+            }
+
             .header {
                 padding: 20px 20px;
             }
@@ -470,6 +482,9 @@
                 display: flex;
                 flex-direction: column;
                 min-height: 0;
+                min-width: 0;
+                width: 100%;
+                margin: 0;
                 overflow: hidden;
                 padding: 12px;
             }
@@ -479,6 +494,8 @@
                 display: flex;
                 flex-direction: column;
                 min-height: 0;
+                min-width: 0;
+                width: 100%;
             }
 
             body.app-mode.chat-tab-active .header,
@@ -492,6 +509,7 @@
                 display: flex;
                 flex-direction: column;
                 min-height: 0;
+                min-width: 0;
             }
 
             body.app-mode.chat-tab-active #chatTab.active > * {
