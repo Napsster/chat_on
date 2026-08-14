@@ -59,7 +59,10 @@ def _load_env_file(path: Path):
 _load_env_file(APP_DIR / ".env")
 
 IS_LOCAL = os.getenv('IS_LOCAL', 'true').lower() == 'true'
-PROJECT_DIR = str(APP_DIR) if IS_LOCAL else "/home/chetan/apps/onboarding-agent"
+# Defaults to wherever agent.py actually lives, so a fresh git clone on any
+# server works out of the box. Override only if uploads/db/knowledge should
+# live somewhere other than the checkout itself.
+PROJECT_DIR = os.getenv('PROJECT_DIR', str(APP_DIR))
 
 logger.info(f"Running in {'LOCAL' if IS_LOCAL else 'PRODUCTION'} mode")
 logger.info(f"Project directory: {PROJECT_DIR}")
