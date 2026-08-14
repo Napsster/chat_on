@@ -394,6 +394,27 @@
                 padding: 20px;
             }
 
+            /* iOS/Android auto-zoom the page when a focused input's font is
+               under 16px — that's the "zoomed in after login" bug, since the
+               zoom sticks around after the login form is replaced by the
+               chat view. 16px avoids triggering it in the first place
+               (better than disabling pinch-zoom entirely). */
+            input[type="text"],
+            input[type="password"],
+            input[type="email"],
+            input[type="file"],
+            select,
+            textarea {
+                font-size: 16px;
+            }
+
+            /* Bumped specificity (form.chat-input-row) so this beats the
+               unconditional .chat-input-row input{font-size:14px} rule
+               below it in the cascade. */
+            form.chat-input-row input {
+                font-size: 16px;
+            }
+
             /* The admin tab bar has more buttons than fit a phone screen;
                let it scroll horizontally instead of overflowing the page. */
             .tabs {
@@ -538,7 +559,11 @@
             }
 
             body.app-mode.chat-tab-active #chatTab.active .chat-log {
-                background: #e5ddd5;
+                background-color: #e5ddd5;
+                /* Subtle dot texture so an empty/fresh chat doesn't read as
+                   a flat, blank grey patch. */
+                background-image: radial-gradient(circle at 1px 1px, rgba(0, 0, 0, 0.06) 1px, transparent 0);
+                background-size: 22px 22px;
                 border-radius: 0;
                 padding: 12px;
             }
