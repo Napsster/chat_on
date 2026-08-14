@@ -79,7 +79,7 @@ Server will be running at: **http://localhost:8002**
 
 ### 6. Test the Upload Interface
 
-- Upload interface: http://localhost:8002/upload-interface
+- Upload interface: http://localhost:8002/ (or /upload-interface)
 - Health check: http://localhost:8002/health
 - Status: http://localhost:8002/status
 
@@ -137,8 +137,7 @@ chatbot-local/
 ├── lookup_store.py             # Candidate directory (onboarding log) lookup by phone
 ├── file_upload_handler.py      # File upload & user auth logic (SQLite-backed)
 ├── knowledge.md                # Knowledge base the WhatsApp bot answers from
-├── upload_interface.html       # Web UI for HR to upload/manage knowledge docs
-├── index.html                  # HTML mockup (from initial task)
+├── index.html                  # Web UI (chat + HR upload/manage knowledge docs), served at /
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Example environment variables
 ├── venv/                       # Virtual environment (created after setup)

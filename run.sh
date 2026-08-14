@@ -20,7 +20,7 @@ source venv/bin/activate
 export IS_LOCAL=true
 
 echo "📍 Chatbot starting on http://localhost:8002"
-echo "📍 Upload interface: http://localhost:8002/upload-interface"
+echo "📍 Upload interface: http://localhost:8002/ (or /upload-interface)"
 echo ""
 echo "Press Ctrl+C to stop"
 echo ""

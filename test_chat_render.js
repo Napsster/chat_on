@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Guardrail for the web chat's markdown renderer (upload_interface.html).
+ * Guardrail for the web chat's markdown renderer (index.html).
  *
  * Extracts the ACTUAL shipped escapeHtml/renderInline/renderMarkdown
- * function source out of upload_interface.html (not a reimplementation —
+ * function source out of index.html (not a reimplementation —
  * this always tests the real code, so it can't silently drift out of sync)
  * and runs it against markdown patterns the bot's replies actually produce:
  * bold, links, bullets, headings, inline code, and — the bug this file was
  * written after — pipe tables (KB documents are full of these; an
  * unrendered table shows up as a garbled wall of "|" and "-" characters).
  *
- * Run after ANY change to the renderer in upload_interface.html:
+ * Run after ANY change to the renderer in index.html:
  *   node test_chat_render.js
  *
  * Exits non-zero on any failure, so it's also CI/pre-deploy-friendly.
@@ -19,7 +19,7 @@ const fs = require("fs");
 const path = require("path");
 const assert = require("assert");
 
-const HTML_PATH = path.join(__dirname, "upload_interface.html");
+const HTML_PATH = path.join(__dirname, "index.html");
 const html = fs.readFileSync(HTML_PATH, "utf-8");
 
 const startMarker = "function escapeHtml(text) {";
@@ -27,7 +27,7 @@ const endMarker = "\n        function appendChatBubble(";
 const startIdx = html.indexOf(startMarker);
 const endIdx = html.indexOf(endMarker);
 if (startIdx === -1 || endIdx === -1) {
-    console.error("Could not locate renderer functions in upload_interface.html — markers moved?");
+    console.error("Could not locate renderer functions in index.html — markers moved?");
     process.exit(1);
 }
 const rendererSource = html.slice(startIdx, endIdx);
@@ -53,7 +53,7 @@ function check(name, fn) {
     }
 }
 
-console.log("Testing renderMarkdown() extracted live from upload_interface.html\n");
+console.log("Testing renderMarkdown() extracted live from index.html\n");
 
 check("bold renders as <strong>, no literal ** left", () => {
     const out = renderMarkdown("We work with **650+ brands, 675+ certified recyclers, and 5,000+ aggregators**.");

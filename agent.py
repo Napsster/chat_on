@@ -1100,17 +1100,21 @@ def rebuild_and_reload_knowledge():
         logger.error(f"Could not rebuild knowledge files: {[msg for ok, msg in results if not ok]}")
 
 
-@app.get("/upload-interface")
-async def get_upload_interface():
-    """Serve the upload interface HTML"""
-    interface_path = APP_DIR / "upload_interface.html"
+def _serve_interface():
+    interface_path = APP_DIR / "index.html"
     if interface_path.exists():
         return FileResponse(interface_path, media_type="text/html")
     else:
         return JSONResponse(
-            {"error": "Upload interface not found"},
+            {"error": "Interface not found"},
             status_code=404
         )
+
+
+@app.get("/upload-interface")
+async def get_upload_interface():
+    """Serve the chat/upload interface HTML (also served at "/" — kept as an alias)"""
+    return _serve_interface()
 
 
 @app.post("/register")
@@ -1600,14 +1604,9 @@ async def status():
 
 @app.get("/")
 async def root():
-    return {
-        "service": "Recykal Onboarding Agent",
-        "status": "running",
-        "engine": "deepseek-chat",
-        "grounding": "knowledge.md only",
-        "webhook": "/whatsapp",
-        "upload_interface": "/upload-interface",
-    }
+    """Serve the chat/upload interface as the site's landing page.
+    Service info previously returned here now lives at /health and /status."""
+    return _serve_interface()
 
 
 @app.on_event("startup")
