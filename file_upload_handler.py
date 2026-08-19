@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean, text
+from sqlalchemy import create_engine, Column, String, DateTime, Integer, Text, Boolean, text, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -193,11 +193,16 @@ class FileUploadManager:
         """
         if role not in ('admin', 'user'):
             role = 'admin'
+        if not email.strip().lower().endswith('@recykal.com'):
+            return False, "Email must be a @recykal.com address"
         session = self.Session()
         try:
-            # Check if user exists
+            # Check if user exists — case-insensitive, so "Anjali" and "anjali"
+            # collide as the same account rather than creating duplicates.
+            uname_lower = username.strip().lower()
+            email_lower = email.strip().lower()
             existing = session.query(User).filter(
-                (User.username == username) | (User.email == email)
+                (func.lower(User.username) == uname_lower) | (func.lower(User.email) == email_lower)
             ).first()
 
             if existing:
@@ -224,6 +229,32 @@ class FileUploadManager:
         finally:
             session.close()
 
+    def reset_password(self, username: str, new_password: str) -> Tuple[bool, str]:
+        """Admin-triggered password reset — same case-insensitive
+        username-or-email lookup as login, so it finds the account
+        regardless of which form the admin typed."""
+        session = self.Session()
+        try:
+            lookup_lower = username.strip().lower()
+            user = session.query(User).filter(
+                (func.lower(User.username) == lookup_lower) | (func.lower(User.email) == lookup_lower)
+            ).first()
+
+            if not user:
+                return False, "User not found"
+
+            user.password_hash = hash_password(new_password)
+            session.commit()
+
+            logger.info(f"Password reset for user: {user.username}")
+            return True, "Password reset successfully"
+
+        except Exception as e:
+            logger.error(f"Password reset error: {e}")
+            return False, str(e)
+        finally:
+            session.close()
+
     def authenticate_user(self, username: str, password: str) -> Tuple[bool, str]:
         """
         Authenticate a user
@@ -237,8 +268,10 @@ class FileUploadManager:
         """
         session = self.Session()
         try:
+            # Case-insensitive: "Anjali" and "anjali" resolve to the same account.
+            login_lower = username.strip().lower()
             user = session.query(User).filter(
-                (User.username == username) | (User.email == username)
+                (func.lower(User.username) == login_lower) | (func.lower(User.email) == login_lower)
             ).first()
 
             if not user:
@@ -261,10 +294,17 @@ class FileUploadManager:
             session.close()
 
     def get_user_by_username(self, username: str) -> Optional[Dict]:
-        """Look up a user by username (no password hash in the result) — used by auth.get_current_user"""
+        """Look up a user by username or email, case-insensitive (no password
+        hash in the result) — used by auth.get_current_user on every
+        authenticated request, so this must resolve the same way
+        authenticate_user's login lookup does, or a case-mismatched or
+        email-based login issues a token that 401s on the very next request."""
         session = self.Session()
         try:
-            user = session.query(User).filter(User.username == username).first()
+            lookup_lower = username.strip().lower()
+            user = session.query(User).filter(
+                (func.lower(User.username) == lookup_lower) | (func.lower(User.email) == lookup_lower)
+            ).first()
             if not user:
                 return None
             return {'id': user.id, 'username': user.username, 'email': user.email, 'fullname': user.fullname, 'role': user.role}

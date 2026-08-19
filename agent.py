@@ -1549,6 +1549,25 @@ async def revoke_user(username: str, current_user: dict = Depends(require_admin)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/users/{username}/reset-password")
+async def reset_user_password(
+    username: str,
+    new_password: str = Form(...),
+    current_user: dict = Depends(require_admin)
+):
+    """Admin-only: set a new password for a user account"""
+    if len(new_password) < 6:
+        return JSONResponse({"success": False, "error": "Password must be at least 6 characters"}, status_code=400)
+    try:
+        success, message = upload_manager.reset_password(username, new_password)
+        if not success:
+            return JSONResponse({"success": False, "error": message}, status_code=404)
+        return JSONResponse({"success": True, "message": message})
+    except Exception as e:
+        logger.error(f"Reset password error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/users/{username}/chat")
 async def get_user_chat_transcript(username: str, current_user: dict = Depends(require_admin)):
     """Admin-only: read a user's web-chat conversation history — the same

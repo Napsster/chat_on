@@ -1879,6 +1879,10 @@
                                         onclick="viewUserChat('${u.username}')">
                                         View Chat
                                     </button>
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px;"
+                                        onclick="resetUserPassword('${u.username}')">
+                                        Reset Password
+                                    </button>
                                     <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px; color:#e74c3c;"
                                         onclick="revokeUser('${u.username}')">
                                         Revoke
@@ -1909,6 +1913,30 @@
                     }
                 })
                 .catch(error => showAlert('usersAlert', 'Error revoking access: ' + error.message, 'error'));
+        }
+
+        function resetUserPassword(username) {
+            const newPassword = prompt(`New password for "${username}" (at least 6 characters):`);
+            if (newPassword === null) return;
+            if (newPassword.length < 6) {
+                showAlert('usersAlert', 'Password must be at least 6 characters', 'error');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('new_password', newPassword);
+            authedFetch(`/users/${encodeURIComponent(username)}/reset-password`, {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showAlert('usersAlert', `Password reset for "${username}"`, 'success');
+                    } else {
+                        showAlert('usersAlert', data.error || 'Could not reset password', 'error');
+                    }
+                })
+                .catch(error => showAlert('usersAlert', 'Error resetting password: ' + error.message, 'error'));
         }
 
         function viewUserChat(username) {
