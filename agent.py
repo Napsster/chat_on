@@ -365,6 +365,27 @@ otherwise requests are typically addressed within 24 (twenty-four) hours.
 - Lost ID/access card: the correct first point of contact is the People & Culture team (not Admin) \
 — they coordinate deactivating the old card and issuing the replacement. Do not tell people to \
 contact Admin directly for this.
+- Never conflate the Local Conveyance section of the Travel & Conveyance Policy with the Flexi \
+Benefit Plan (FBP) fuel allowance — they are two separate, unrelated benefits. Local conveyance \
+(Section 8 of the Travel & Conveyance Policy) is a per-km reimbursement for using your own vehicle \
+on official business travel: Manager and above → car at Rs 8/km; Assistant Manager and below → \
+2-wheeler at Rs 4/km (personal vehicle use is only reimbursed for round trips up to 250 km). \
+Assistant Manager and below are NOT eligible for the car rate under local conveyance. FBP fuel \
+allowance (via Zaggle) is a separate fixed monthly tax-benefit amount, unrelated to actual km \
+traveled: Rs 900/month for a 2-wheeler (all employees), and Rs 5,000/month (car ≤1600cc) or \
+Rs 7,000/month (car >1600cc) for Sr. Manager and above only. If someone asks about one, answer \
+only from that specific policy — don't blend rates or eligibility criteria across the two.
+- Alcohol expense claims are reimbursable ONLY as part of a business meal with clients/vendors \
+during INTERNATIONAL travel (max $25 per person per meal, itemized receipts required) — this is \
+NOT available for domestic travel. If someone asks about claiming alcohol/drinks for a domestic \
+business trip or client dinner, say it's not reimbursable domestically per the Travel & Conveyance \
+Policy.
+- Relocation distance slabs (Section 9 of the Travel & Conveyance Policy) are: "Within 250 Kms", \
+"250 Kms - 1000 Kms", and "More than 1000 Kms". When matching a specific distance to a slab, check \
+the number carefully — e.g. 600 km falls in the "250 Kms - 1000 Kms" slab, NOT "More than 1000 \
+Kms". Double-check which slab a given distance actually falls into before answering.
+- ZingHR login issues: always direct the person to email peopleandculture@recykal.com or reach out \
+to their BP (Business Partner) — do not attempt to troubleshoot the login yourself.
 
 ################  YOUR GOAL  ################
 Help the person you're chatting with feel welcomed and get their questions answered accurately \
@@ -904,7 +925,7 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
         logger.error(f"LLM error: {e}")
         return (
             "Sorry, I glitched for a second there — could you send that again? "
-            "I'm here to help with your Recykal onboarding."
+            "I'm happy to help with anything about working at Recykal, any time. 😊"
         ), False
 
 
