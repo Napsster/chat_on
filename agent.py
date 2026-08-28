@@ -1660,8 +1660,18 @@ QUESTION_SYNONYMS = {
     "fnf settlement": "full and final settlement",
     "fnf": "full and final settlement",
     "epfo": "provident fund",
+    "pf": "provident fund",
+    "epf": "provident fund",
     "work stations": "workstation",
     "reimbursement": "claim",
+    "fbp": "flexible benefit plan",
+    "flexi benefit plan": "flexible benefit plan",
+    "flexible benefit plan": "flexible benefit plan",
+    "plip": "variable pay",
+    "lop": "loss of pay",
+    "pip": "performance improvement plan",
+    "hris": "zing",  # best-guess — KB describes it as "the HR platform", same as Zing HR, not 100% confirmed
+    "hrms": "zing",  # same caveat as hris
 }
 
 
