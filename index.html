@@ -292,7 +292,9 @@
 
         .tabs {
             display: flex;
-            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 4px;
             margin-bottom: 20px;
             border-bottom: 2px solid #e0e0e0;
         }
@@ -300,12 +302,14 @@
         .tab-button {
             background: none;
             border: none;
-            padding: 10px 20px;
+            padding: 10px 13px;
             cursor: pointer;
             color: #999;
             font-weight: 600;
+            font-size: 14px;
             border-bottom: 3px solid transparent;
             transition: all 0.3s;
+            white-space: nowrap;
         }
 
         .tab-button.active {
@@ -418,6 +422,7 @@
             /* The admin tab bar has more buttons than fit a phone screen;
                let it scroll horizontally instead of overflowing the page. */
             .tabs {
+                flex-wrap: nowrap;
                 overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
                 min-width: 0;
@@ -879,6 +884,7 @@
                     <button class="tab-button" data-tab="chat" onclick="switchTab('chat')">💬 Try the Bot</button>
                     <button class="tab-button admin-only-tab" data-tab="outreach" onclick="switchTab('outreach')">📣 Outreach</button>
                     <button class="tab-button admin-only-tab" data-tab="users" onclick="switchTab('users')">👥 Users</button>
+                    <button class="tab-button admin-only-tab" data-tab="whatsapp" onclick="switchTab('whatsapp')"><svg width="16" height="16" viewBox="0 0 24 24" style="vertical-align:-3px; margin-right:4px;" aria-hidden="true"><path fill="#25D366" d="M12.04 2c-5.52 0-10 4.48-10 10 0 1.77.46 3.45 1.32 4.94L2 22l5.2-1.36A9.96 9.96 0 0 0 12.04 22c5.52 0 10-4.48 10-10s-4.48-10-10-10zm5.87 14.2c-.25.7-1.45 1.33-2 1.42-.53.08-1.16.12-1.87-.12-.43-.14-.98-.32-1.68-.63-2.96-1.28-4.89-4.26-5.04-4.46-.15-.2-1.2-1.6-1.2-3.05 0-1.45.76-2.16 1.03-2.46.27-.3.6-.37.8-.37h.57c.18 0 .43-.07.67.51.25.6.85 2.07.92 2.22.07.15.12.33.02.53-.1.2-.15.32-.3.5-.15.17-.31.38-.44.51-.15.15-.3.31-.13.6.17.3.76 1.25 1.63 2.03 1.12 1 2.06 1.31 2.36 1.46.3.15.47.12.65-.07.18-.2.75-.87.95-1.17.2-.3.4-.25.67-.15.28.1 1.75.83 2.05.98.3.15.5.22.57.35.08.13.08.75-.17 1.45z"/></svg>WhatsApp</button>
                 </div>
 
                 <!-- Upload Tab -->
@@ -1042,6 +1048,20 @@
                     <button type="button" class="button" id="createUserBtn" style="width:auto;" onclick="createUser()">Create User Account</button>
 
                     <div id="userList" style="margin-top: 20px;"></div>
+                </div>
+
+                <!-- WhatsApp Tab -->
+                <div id="whatsappTab" class="tab-content">
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:15px; flex-wrap:wrap;">
+                        <p style="color: #666; font-size: 14px; margin-bottom: 15px;">
+                            Everyone who has messaged the bot on WhatsApp, most recently active first.
+                        </p>
+                        <button type="button" class="button secondary" id="exportWhatsAppBtn" style="width:auto; padding:8px 14px; font-size:13px; white-space:nowrap;" onclick="exportWhatsAppChats()">
+                            ⬇ Export to Excel
+                        </button>
+                    </div>
+                    <div id="whatsappAlert"></div>
+                    <div id="whatsappSessionList" style="margin-top: 10px;"></div>
                 </div>
             </div>
         </div>
@@ -1319,6 +1339,9 @@
             }
             if (tab === 'users') {
                 loadUsers();
+            }
+            if (tab === 'whatsapp') {
+                loadWhatsAppSessions();
             }
         }
 
@@ -1897,6 +1920,95 @@
                 .catch(error => {
                     console.error('Error loading users:', error);
                     showAlert('usersAlert', 'Could not load user accounts', 'error');
+                });
+        }
+
+        async function exportWhatsAppChats() {
+            const btn = document.getElementById('exportWhatsAppBtn');
+            btn.disabled = true;
+            btn.textContent = 'Exporting...';
+            try {
+                const response = await authedFetch('/whatsapp/export');
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    throw new Error(data.error || 'Export failed');
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `whatsapp_chats_${new Date().toISOString().slice(0, 10)}.xlsx`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(url);
+            } catch (error) {
+                showAlert('whatsappAlert', 'Error exporting: ' + error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '⬇ Export to Excel';
+            }
+        }
+
+        function loadWhatsAppSessions() {
+            authedFetch('/whatsapp/sessions')
+                .then(response => response.json())
+                .then(data => {
+                    const div = document.getElementById('whatsappSessionList');
+                    if (data.sessions && data.sessions.length > 0) {
+                        div.innerHTML = '';
+                        data.sessions.forEach(s => {
+                            const item = document.createElement('div');
+                            item.className = 'file-item';
+                            item.innerHTML = `
+                                <div>
+                                    <div class="file-name">${escapeHtml(s.phone)}</div>
+                                    <div class="file-size">
+                                        ${s.message_count} message${s.message_count === 1 ? '' : 's'} &middot;
+                                        ${s.last_message_at ? 'last active ' + new Date(s.last_message_at).toLocaleString() : 'no messages yet'}
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <button type="button" class="button secondary" style="width:auto; padding:8px 14px; font-size:13px;">
+                                        View Chat
+                                    </button>
+                                </div>
+                            `;
+                            item.querySelector('button').addEventListener('click', () => viewWhatsAppChat(s.phone));
+                            div.appendChild(item);
+                        });
+                    } else {
+                        div.innerHTML = '<p style="color:#999; text-align:center;">No WhatsApp conversations yet.</p>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading WhatsApp sessions:', error);
+                    showAlert('usersAlert', 'Could not load WhatsApp conversations', 'error');
+                });
+        }
+
+        function viewWhatsAppChat(phone) {
+            authedFetch(`/whatsapp/${encodeURIComponent(phone)}/chat`)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('chatViewTitle').textContent = `WhatsApp chat — ${phone}`;
+                    const log = document.getElementById('chatViewLog');
+                    const history = (data.history || []).filter(m => m.role === 'user' || m.role === 'assistant');
+                    if (history.length === 0) {
+                        log.innerHTML = '<p style="color:#999; text-align:center;">No messages yet.</p>';
+                    } else {
+                        log.innerHTML = history.map(m => `
+                            <div class="chat-bubble ${m.role === 'user' ? 'user' : 'bot'}">${
+                                m.role === 'user' ? escapeHtml(m.content) : renderMarkdown(m.content)
+                            }</div>
+                        `).join('');
+                    }
+                    document.getElementById('chatViewModal').style.display = 'flex';
+                    log.scrollTop = log.scrollHeight;
+                })
+                .catch(error => {
+                    console.error('Error loading WhatsApp chat:', error);
+                    showAlert('usersAlert', 'Could not load WhatsApp chat history', 'error');
                 });
         }
 

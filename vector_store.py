@@ -136,16 +136,19 @@ _SHARED_MODEL = None
 # onnxruntime's default thread pool and batch size scale their memory use with
 # both threads and input size — on a small VPS a big knowledge-base rebuild
 # (hundreds of chunks in one call) can spike well past what a single small
-# request needs. threads=1 and a small EMBED_BATCH_SIZE bound peak memory
-# regardless of corpus size, at the cost of a somewhat slower rebuild.
-EMBED_BATCH_SIZE = 16
+# request needs. threads=1 kept rebuilds single-threaded to bound that spike,
+# but on the actual deployed VM (4 cores, 7.4GB RAM, ~900MB observed peak)
+# that was excess caution — threads=2 still leaves 2 cores free for the app
+# + nginx during a rebuild, and roughly halves rebuild time. Revisit if this
+# VM's specs ever shrink.
+EMBED_BATCH_SIZE = 32
 
 
 def _shared_model_lazy():
     global _SHARED_MODEL
     if _SHARED_MODEL is None:
         from fastembed import TextEmbedding
-        _SHARED_MODEL = TextEmbedding(EMBED_MODEL, threads=1)
+        _SHARED_MODEL = TextEmbedding(EMBED_MODEL, threads=2)
     return _SHARED_MODEL
 
 
@@ -203,33 +206,56 @@ class VectorStore:
         except Exception as e:  # pragma: no cover
             print(f"⚠️  VectorStore unavailable, will fall back to full KB: {e}")
 
-    def _file_hash(self) -> str:
-        h = hashlib.sha256(self.knowledge_path.read_bytes()).hexdigest()
-        return f"{h}:{MAX_CHARS}:{EMBED_MODEL}"
+    def _chunk_hash(self, chunk: str) -> str:
+        # Versioned so a MAX_CHARS/EMBED_MODEL change invalidates every
+        # cached vector, same as the old whole-file hash did.
+        return hashlib.sha256(f"{MAX_CHARS}:{EMBED_MODEL}:{chunk}".encode("utf-8")).hexdigest()
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         return embed_texts(texts)
 
     def _build_or_load(self):
-        current_hash = self._file_hash()
-        if self.cache_path.exists():
-            data = np.load(self.cache_path, allow_pickle=True)
-            if str(data.get("hash")) == current_hash:
-                self.chunks = list(data["chunks"])
-                self.vectors = data["vectors"]
-                print(f"✓ Vector cache loaded: {len(self.chunks)} chunks")
-                return
-
+        # Cached per-chunk, not per-file: editing/adding one document only
+        # needs its own chunks re-embedded — everything else's vector is
+        # still sitting in cache under its own content hash and gets reused,
+        # regardless of where it now sits in the rebuilt file or how many
+        # other documents changed around it.
         text = self.knowledge_path.read_text(encoding="utf-8")
         self.chunks = _chunk_markdown(text)
-        self.vectors = self._embed(self.chunks)
+        hashes = [self._chunk_hash(c) for c in self.chunks]
+
+        cached: dict[str, np.ndarray] = {}
+        if self.cache_path.exists():
+            try:
+                # allow_pickle=True is required for the object-dtype hash
+                # array; safe here — this file is written only by np.savez()
+                # a few lines below, in this same process, never from
+                # uploaded or otherwise externally-supplied content.
+                data = np.load(self.cache_path, allow_pickle=True)
+                cached = dict(zip(data["hashes"], data["vectors"]))
+            except KeyError:
+                pass  # old whole-file-hash cache format — one-time full rebuild, then this format from here on
+
+        missing = [i for i, h in enumerate(hashes) if h not in cached]
+        if missing:
+            new_vectors = self._embed([self.chunks[i] for i in missing])
+            for i, vec in zip(missing, new_vectors):
+                cached[hashes[i]] = vec
+
+        self.vectors = np.array([cached[h] for h in hashes], dtype=np.float32)
+
+        # Save only hashes actually used this build — chunks from since-
+        # deleted/edited documents drop out instead of accumulating forever.
         np.savez(
             self.cache_path,
-            hash=current_hash,
-            chunks=np.array(self.chunks, dtype=object),
+            hashes=np.array(hashes, dtype=object),
             vectors=self.vectors,
         )
-        print(f"✓ Vector store built: {len(self.chunks)} chunks embedded")
+        if missing:
+            print(f"✓ Vector store updated: {len(missing)} new/changed chunk(s) embedded, "
+                  f"{len(hashes) - len(missing)} reused from cache ({len(hashes)} total)")
+        else:
+            print(f"✓ Vector cache fully reused: {len(hashes)} chunks, 0 re-embedded")
 
     def retrieve(self, query: str, k: int = 8) -> list[str]:
         if not self.ready or self.vectors is None:

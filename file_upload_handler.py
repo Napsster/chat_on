@@ -588,6 +588,64 @@ class FileUploadManager:
         finally:
             session.close()
 
+    def get_questions_for_session(self, session_key: str) -> List[Dict]:
+        """All logged questions for one session_key (phone number or
+        web-<username>), oldest first — the read side of log_question."""
+        session = self.Session()
+        try:
+            rows = (
+                session.query(QuestionLog)
+                .filter(QuestionLog.session_key == session_key)
+                .order_by(QuestionLog.asked_at.asc())
+                .all()
+            )
+            return [
+                {
+                    "asked_at": row.asked_at.isoformat() if row.asked_at else None,
+                    "channel": row.channel,
+                    "question": row.question,
+                    "unanswered": row.unanswered,
+                    "segment": row.segment,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching questions for {session_key}: {e}")
+            return []
+        finally:
+            session.close()
+
+    def get_whatsapp_sessions(self) -> List[Dict]:
+        """List every WhatsApp session (phone numbers only — web-<username>
+        sessions excluded), most recently active first, with a message
+        count. Powers the portal's WhatsApp chat list."""
+        session = self.Session()
+        try:
+            rows = (
+                session.query(UserSession)
+                .filter(~UserSession.session_key.like("web-%"))
+                .order_by(UserSession.last_message_at.desc())
+                .all()
+            )
+            out = []
+            for row in rows:
+                count = (
+                    session.query(ChatMessage)
+                    .filter(ChatMessage.session_key == row.session_key)
+                    .count()
+                )
+                out.append({
+                    "phone": row.session_key,
+                    "last_message_at": row.last_message_at,
+                    "message_count": count,
+                })
+            return out
+        except Exception as e:
+            logger.error(f"Error listing WhatsApp sessions: {e}")
+            return []
+        finally:
+            session.close()
+
     def get_user_data(self, session_key: str) -> Dict:
         """Reconstruct the same dict shape the old data/users/*.json files
         held: {"phone": ..., "email": ..., "history": [...], "segment": ...,

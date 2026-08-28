@@ -1602,6 +1602,136 @@ async def get_user_chat_transcript(username: str, current_user: dict = Depends(r
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/whatsapp/sessions")
+async def list_whatsapp_sessions(current_user: dict = Depends(require_admin)):
+    """Admin-only: list every phone number that has messaged the WhatsApp
+    bot, most recently active first — feeds the portal's WhatsApp chat list."""
+    try:
+        return JSONResponse({"success": True, "sessions": upload_manager.get_whatsapp_sessions()})
+    except Exception as e:
+        logger.error(f"List WhatsApp sessions error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/whatsapp/export")
+async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
+    """Admin-only: Excel export of every WhatsApp conversation. Sheet 1 is
+    one row per question (name, phone, question, answer). Sheet 2 groups
+    semantically-similar questions together — via the same embedding
+    clustering vector_store.py already uses for KB search — so repeated
+    asks (worded differently) surface as one group instead of scattered
+    rows."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from vector_store import cluster_similar_texts
+
+    try:
+        sessions = upload_manager.get_whatsapp_sessions()
+        all_rows = []
+        for s in sessions:
+            phone = s["phone"]
+            candidate = DIRECTORY.lookup(phone)
+            name = DIRECTORY.name_of(candidate) if candidate else ""
+
+            # Pair up each user turn with the assistant turn right after it,
+            # so every logged question can be matched to its answer.
+            history = get_user_data(phone).get("history", [])
+            pairs = []
+            pending_user = None
+            for msg in history:
+                if msg.get("role") == "user":
+                    pending_user = msg.get("content", "")
+                elif msg.get("role") == "assistant" and pending_user is not None:
+                    pairs.append((pending_user, msg.get("content", "")))
+                    pending_user = None
+            used = [False] * len(pairs)
+
+            for q in upload_manager.get_questions_for_session(phone):
+                answer = ""
+                # Match by exact text against the earliest unused pair —
+                # document-upload turns aren't logged as questions, so a
+                # position-only zip would drift; exact match stays correct
+                # and just leaves "answer" blank for the rare case it can't
+                # find one, rather than pairing the wrong answer.
+                for i, (u, a) in enumerate(pairs):
+                    if not used[i] and u == q["question"]:
+                        used[i] = True
+                        answer = a
+                        break
+                all_rows.append({
+                    "name": name,
+                    "phone": phone,
+                    "question": q["question"],
+                    "answer": answer,
+                    "answered": "No" if q["unanswered"] else "Yes",
+                    "segment": q["segment"] or "",
+                    "asked_at": q["asked_at"] or "",
+                })
+
+        wb = Workbook()
+        ws1 = wb.active
+        ws1.title = "Q&A Log"
+        ws1.append(["Name", "Phone", "Question", "Answer", "Answered", "Segment", "Asked At"])
+        for cell in ws1[1]:
+            cell.font = Font(bold=True)
+        for r in all_rows:
+            ws1.append([r["name"], r["phone"], r["question"], r["answer"], r["answered"], r["segment"], r["asked_at"]])
+        for col, width in zip("ABCDEFG", [20, 16, 50, 60, 10, 12, 20]):
+            ws1.column_dimensions[col].width = width
+
+        ws2 = wb.create_sheet("Grouped Questions")
+        ws2.append(["Group #", "Representative Question", "Times Asked", "Unique Askers", "All Variants"])
+        for cell in ws2[1]:
+            cell.font = Font(bold=True)
+
+        clusters = cluster_similar_texts([r["question"] for r in all_rows], threshold=0.83)
+        clusters.sort(key=len, reverse=True)
+        for gi, group in enumerate(clusters, start=1):
+            variants = [all_rows[i]["question"] for i in group]
+            phones = {all_rows[i]["phone"] for i in group}
+            rep = max(set(variants), key=variants.count)  # most common exact wording
+            ws2.append([gi, rep, len(group), len(phones), " | ".join(sorted(set(variants)))[:1000]])
+        for col, width in zip("ABCDE", [10, 50, 12, 12, 80]):
+            ws2.column_dimensions[col].width = width
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        filename = f"whatsapp_chats_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.error(f"WhatsApp export error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/whatsapp/{phone}/chat")
+async def get_whatsapp_chat_transcript(phone: str, current_user: dict = Depends(require_admin)):
+    """Admin-only: read a WhatsApp user's conversation history — same
+    session storage as /users/{username}/chat, but WhatsApp sessions are
+    keyed by the raw phone number (with country code) instead of a
+    "web-<username>" prefix, so there's no matching portal view for them
+    without this. Accepts the phone with or without a leading '+'."""
+    normalized = phone if phone.startswith("+") else f"+{phone}"
+    if not re.match(r"^\+[0-9]{6,20}$", normalized):
+        return JSONResponse({"error": "Invalid phone number"}, status_code=400)
+    try:
+        data = get_user_data(normalized)
+        questions = upload_manager.get_questions_for_session(normalized)
+        return JSONResponse({
+            "success": True,
+            "phone": normalized,
+            "history": data.get("history", []),
+            "questions": questions,
+        })
+    except Exception as e:
+        logger.error(f"Get WhatsApp chat transcript error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ============================================================================
 # STATUS / HEALTH / ROOT
 # ============================================================================
