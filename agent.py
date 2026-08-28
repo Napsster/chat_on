@@ -1636,6 +1636,44 @@ async def list_whatsapp_sessions(current_user: dict = Depends(require_admin)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# Domain jargon/acronyms that mean the same thing but embed too far apart for
+# the WhatsApp export's semantic clustering to catch on its own (e.g. "HRBP",
+# "BP", and "Business Partner" are the same role, but as raw text they aren't
+# similar enough to reliably land in one cluster at the clustering threshold).
+# Applied only to normalize what gets clustered — the exported sheet always
+# shows each question's real, original wording. Add new entries here as new
+# acronyms/jargon show up in real questions.
+QUESTION_SYNONYMS = {
+    "hr business partner": "business partner",
+    "hrbp": "business partner",
+    "hbrp": "business partner",  # common typo — letters swapped
+    "bp": "business partner",
+    "business partner": "business partner",
+    "people & culture": "people and culture",
+    "people and culture": "people and culture",
+    "p&c": "people and culture",
+    "wfh": "work from home",
+    "poc": "point of contact",
+    "zinghr": "zing",
+    "zing portal": "zing",
+    "athendance": "attendance",  # common typo
+    "fnf settlement": "full and final settlement",
+    "fnf": "full and final settlement",
+    "epfo": "provident fund",
+    "work stations": "workstation",
+    "reimbursement": "claim",
+}
+
+
+def _normalize_for_clustering(text: str) -> str:
+    normalized = text.lower()
+    # Longest phrases first, so "hr business partner" matches whole before
+    # the shorter "bp"/"hrbp" entries get a chance to partially match it.
+    for variant in sorted(QUESTION_SYNONYMS, key=len, reverse=True):
+        normalized = re.sub(rf"\b{re.escape(variant)}\b", QUESTION_SYNONYMS[variant], normalized)
+    return normalized
+
+
 @app.get("/whatsapp/export")
 async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
     """Admin-only: Excel export of every WhatsApp conversation. Sheet 1 is
@@ -1708,7 +1746,9 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
         for cell in ws2[1]:
             cell.font = Font(bold=True)
 
-        clusters = cluster_similar_texts([r["question"] for r in all_rows], threshold=0.83)
+        clusters = cluster_similar_texts(
+            [_normalize_for_clustering(r["question"]) for r in all_rows], threshold=0.80
+        )
         clusters.sort(key=len, reverse=True)
         for gi, group in enumerate(clusters, start=1):
             variants = [all_rows[i]["question"] for i in group]
