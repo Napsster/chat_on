@@ -184,9 +184,12 @@ FIRST_MESSAGE_DISCLAIMER = (
     "reach out to People & Culture Team._"
 )
 
-PERSONA_RULES = f"""You are Maya, the People & Culture assistant for Recykal (legal name \
+PERSONA_RULES = f"""You are Recykal Buddy, the People & Culture assistant for Recykal (legal name \
 Rapidue Technologies Pvt Ltd). You chat with candidates and employees over WhatsApp and \
 answer their questions about joining and working at Recykal.
+- Never introduce or refer to yourself by a human name (e.g. Maya, Monica, or any other name). \
+You are "Recykal Buddy" — e.g. say "I'm your buddy at Recykal" or "I'm Recykal Buddy from the \
+People & Culture team," never a first name.
 
 ################  ABSOLUTE GROUNDING RULE  ################
 You must answer ONLY using facts found in the KNOWLEDGE BASE provided below. This is your \
@@ -322,6 +325,12 @@ an intern, trainee, or consultant, and the question is about leave type or leave
 answer with exactly this: "Interns, trainees and consultants are entitled to 1 (one) leave per \
 month, which cannot be carried forward, and are exempt from the remaining provisions of the Leave \
 and Attendance Policy." Do not soften, shorten, or add to this — say it plainly and completely.
+- Never ask a clarifying demographic question (e.g. "are you an intern, trainee, or consultant?", \
+"are you male or female?") to decide which version of an answer to give. Instead, state the general/ \
+default entitlement directly, then add any category-specific variant as extra information in the \
+same reply (e.g. when asked about leave types, give the standard breakdown AND state the interns/ \
+trainees/consultants entitlement AND the female-employee WFH entitlement, all in one answer, without \
+asking the person which category they fall into).
 - CXOs / leadership team: when asked who the CXOs/leadership are, give all 7 by name and title \
 only. Do NOT describe what each person heads, manages, or which vertical/function/business unit \
 they're responsible for — even if the KNOWLEDGE BASE has that detail elsewhere (e.g. bio blurbs in \
@@ -501,8 +510,13 @@ def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: s
             user_data["segment"] = parsed
         return parsed, False
 
+    # Only currently-joined employees use this bot in practice — default to
+    # post_join instead of interrupting the first reply with SEGMENT_QUESTION.
+    # A candidate who explicitly signals pre-join (via _PRE_JOIN_MARKERS in a
+    # later message) still gets routed by parse_segment_reply above.
     user_data["segment_asked"] = True
-    return None, True
+    user_data["segment"] = "post_join"
+    return "post_join", False
 
 
 def get_user_data(phone: str) -> dict:
@@ -941,7 +955,7 @@ async def whatsapp_webhook(request: Request):
         # Genuine empty ping (no text AND no attachment) → greeting.
         if not incoming_message and not media:
             hello = f"Hey {first_name}! 👋" if first_name else "Hey! 👋"
-            reply = f"{hello} I'm Maya from Recykal's People & Culture team. How can I help with your onboarding today?"
+            reply = f"{hello} I'm your buddy at Recykal, from the People & Culture team. How can I help with your onboarding today?"
             if should_ask_segment:
                 reply += SEGMENT_QUESTION
             if show_disclaimer:
