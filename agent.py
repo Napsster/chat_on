@@ -26,7 +26,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from twilio.rest import Client as TwilioClient
 
 from vector_store import VectorStore
-from lookup_store import CandidateDirectory, normalize_phone
+from lookup_store import CandidateDirectory, EmployeeDirectory, normalize_phone
 from google_drive_sync import GoogleDriveSync
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
 from auth import init_auth, create_token, get_current_user, require_admin
@@ -77,6 +77,13 @@ UPLOAD_MEDIA_DIR = APP_DIR / "data" / "uploads"
 
 # --- Candidate directory (onboarding log) for personalisation --------------
 DIRECTORY = CandidateDirectory(APP_DIR)
+EMPLOYEE_DIRECTORY = EmployeeDirectory(APP_DIR)
+
+NOT_AN_EMPLOYEE_REPLY = (
+    "Hmm, my records say you don't work at Recykal 👀 (or my database needs glasses). "
+    "Either way — I only chat with real Recykal employees. If this is a mix-up, "
+    "get People & Culture to sort your number out."
+)
 
 # --- Knowledge base ---------------------------------------------------------
 # knowledge_base.md: curated, git-tracked core (hand-edited, or overwritten by
@@ -981,6 +988,10 @@ async def whatsapp_webhook(request: Request):
 
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
 
+        if not EMPLOYEE_DIRECTORY.is_allowed(phone):
+            logger.info(f"🚫 [WEBHOOK] {phone} not an Active/Resigned employee — sending fallback reply")
+            return whatsapp_reply(phone, NOT_AN_EMPLOYEE_REPLY)
+
         sync_knowledge_from_drive()
 
         user_data = get_user_data(phone)
@@ -1649,9 +1660,16 @@ async def get_user_chat_transcript(username: str, current_user: dict = Depends(r
 @app.get("/whatsapp/sessions")
 async def list_whatsapp_sessions(current_user: dict = Depends(require_admin)):
     """Admin-only: list every phone number that has messaged the WhatsApp
-    bot, most recently active first — feeds the portal's WhatsApp chat list."""
+    bot, most recently active first — feeds the portal's WhatsApp chat list.
+    Each row is tagged with the employee's name from the roster sheet, when
+    that phone number matches one — the UI shows the name in that case,
+    falling back to the bare phone number otherwise."""
     try:
-        return JSONResponse({"success": True, "sessions": upload_manager.get_whatsapp_sessions()})
+        sessions = upload_manager.get_whatsapp_sessions()
+        for s in sessions:
+            s["name"] = EMPLOYEE_DIRECTORY.name_of(s["phone"])
+            s["emp_id"] = EMPLOYEE_DIRECTORY.emp_id_of(s["phone"])
+        return JSONResponse({"success": True, "sessions": sessions})
     except Exception as e:
         logger.error(f"List WhatsApp sessions error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -1723,8 +1741,11 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
         all_rows = []
         for s in sessions:
             phone = s["phone"]
-            candidate = DIRECTORY.lookup(phone)
-            name = DIRECTORY.name_of(candidate) if candidate else ""
+            name = EMPLOYEE_DIRECTORY.name_of(phone) or ""
+            if not name:
+                candidate = DIRECTORY.lookup(phone)
+                name = DIRECTORY.name_of(candidate) if candidate else ""
+            emp_id = EMPLOYEE_DIRECTORY.emp_id_of(phone) or ""
 
             # Pair up each user turn with the assistant turn right after it,
             # so every logged question can be matched to its answer.
@@ -1753,6 +1774,7 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
                         break
                 all_rows.append({
                     "name": name,
+                    "emp_id": emp_id,
                     "phone": phone,
                     "question": q["question"],
                     "answer": answer,
@@ -1764,12 +1786,12 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
         wb = Workbook()
         ws1 = wb.active
         ws1.title = "Q&A Log"
-        ws1.append(["Name", "Phone", "Question", "Answer", "Answered", "Segment", "Asked At"])
+        ws1.append(["Name", "Emp ID", "Phone", "Question", "Answer", "Answered", "Segment", "Asked At"])
         for cell in ws1[1]:
             cell.font = Font(bold=True)
         for r in all_rows:
-            ws1.append([r["name"], r["phone"], r["question"], r["answer"], r["answered"], r["segment"], r["asked_at"]])
-        for col, width in zip("ABCDEFG", [20, 16, 50, 60, 10, 12, 20]):
+            ws1.append([r["name"], r["emp_id"], r["phone"], r["question"], r["answer"], r["answered"], r["segment"], r["asked_at"]])
+        for col, width in zip("ABCDEFGH", [20, 14, 16, 50, 60, 10, 12, 20]):
             ws1.column_dimensions[col].width = width
 
         ws2 = wb.create_sheet("Grouped Questions")
