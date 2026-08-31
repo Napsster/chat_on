@@ -171,6 +171,23 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 DEEPSEEK_MODEL = "deepseek-chat"
 
+# Which LLM answers grounded questions — "deepseek" (default, unchanged) or
+# "claude". Switching is one env var, not a code change; ANTHROPIC_API_KEY
+# must be a real Console API key (sk-ant-api03-...), not a Claude.ai/Claude
+# Code login token (sk-ant-oat01-...) — the SDK resolves it from the
+# environment automatically, same as DeepSeek's key above.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "deepseek")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+_ANTHROPIC_CLIENT = None
+
+
+def _anthropic_client():
+    global _ANTHROPIC_CLIENT
+    if _ANTHROPIC_CLIENT is None:
+        import anthropic
+        _ANTHROPIC_CLIENT = anthropic.Anthropic()
+    return _ANTHROPIC_CLIENT
+
 MAX_HISTORY = 20  # keep last N turns
 
 DEFLECTION = (
@@ -187,9 +204,9 @@ UNANSWERED_MARKER = "[UNANSWERED]"
 
 # Shown once, appended to a brand-new user's first reply only.
 FIRST_MESSAGE_DISCLAIMER = (
-    "\n\n_I'm here to help you settle in and find answers fast. This is general guidance, "
+    "\n\n_I'm here to help you and find answers fast. This is general guidance, "
     "not official confirmation — for decisions, approvals, or anything specific to you, "
-    "reach out to People & Culture Team._"
+    "reach out to People & Culture Team at peopleandculture@recykal.com._"
 )
 
 PERSONA_RULES = f"""You are Recykal Buddy, the People & Culture assistant for Recykal (legal name \
@@ -764,10 +781,15 @@ def verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool
     return hmac.compare_digest(expected, signature_header.split("=", 1)[1])
 
 
-def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None] | None:
-    """Extract (phone, text, media_items, message_id) from a Cloud API webhook
-    payload. Returns None for events with nothing to react to — delivery/read
-    status callbacks arrive on the same webhook and carry no "messages" key."""
+def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None, str | None] | None:
+    """Extract (phone, text, media_items, message_id, button_reply_id) from a
+    Cloud API webhook payload. button_reply_id is None for a normal message,
+    or e.g. "fb_up"/"fb_down" when this is a tap on a feedback button —
+    those carry no text/type Meta would otherwise put in msg["text"], so
+    without handling "interactive" explicitly they'd silently fall through
+    as an empty-text message and get treated as a greeting. Returns None for
+    events with nothing to react to — delivery/read status callbacks arrive
+    on the same webhook and carry no "messages" key."""
     try:
         value = payload["entry"][0]["changes"][0]["value"]
     except (KeyError, IndexError, TypeError):
@@ -779,14 +801,20 @@ def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None
     phone = "+" + re.sub(r"\D", "", msg.get("from", ""))
     msg_type = msg.get("type", "text")
     media = []
+    button_reply_id = None
     if msg_type == "text":
         text = (msg.get("text", {}).get("body") or "").strip()
+    elif msg_type == "interactive":
+        interactive = msg.get("interactive", {}) or {}
+        if interactive.get("type") == "button_reply":
+            button_reply_id = interactive.get("button_reply", {}).get("id")
+        text = ""
     else:
         sub = msg.get(msg_type, {}) or {}
         text = (sub.get("caption") or "").strip()
         if sub.get("id"):
             media.append({"id": sub["id"], "content_type": sub.get("mime_type", "")})
-    return phone, text, media, msg.get("id")
+    return phone, text, media, msg.get("id"), button_reply_id
 
 
 def save_media_meta(phone: str, media: list[dict]) -> list[dict]:
@@ -831,6 +859,41 @@ def send_meta_text(to_phone: str, body: str) -> tuple[bool, str]:
                 "to": re.sub(r"\D", "", to_phone),
                 "type": "text",
                 "text": {"body": body},
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        return True, r.json().get("messages", [{}])[0].get("id", "")
+    except Exception as e:
+        return False, _meta_error_detail(e)
+
+
+def send_meta_interactive_buttons(to_phone: str, body: str) -> tuple[bool, str]:
+    """Same 24h-window reply as send_meta_text, but with 👍/👎 quick-reply
+    buttons attached — used at most once/day per phone to collect feedback
+    without adding a separate follow-up message. A tap comes back as its own
+    webhook event (msg_type == "interactive"), handled in the main webhook,
+    never through the normal KB/LLM pipeline."""
+    if not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return False, "Meta Cloud API not configured (META_ACCESS_TOKEN/META_PHONE_NUMBER_ID missing)"
+    try:
+        r = requests.post(
+            f"{META_GRAPH_BASE}/{META_PHONE_NUMBER_ID}/messages",
+            headers=_meta_headers(),
+            json={
+                "messaging_product": "whatsapp",
+                "to": re.sub(r"\D", "", to_phone),
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {"text": body},
+                    "action": {
+                        "buttons": [
+                            {"type": "reply", "reply": {"id": "fb_up", "title": "👍 Helpful"}},
+                            {"type": "reply", "reply": {"id": "fb_down", "title": "👎 Not helpful"}},
+                        ]
+                    },
+                },
             },
             timeout=30,
         )
@@ -901,6 +964,52 @@ def _welcome_template_configured() -> bool:
 
 
 def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+    """Dispatches to whichever LLM_PROVIDER is configured. Both branches
+    share the exact same contract: (reply_text, unanswered)."""
+    if LLM_PROVIDER == "claude":
+        return _generate_reply_claude(user_data, kb_context, profile_block, segment)
+    return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
+
+
+def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+    """Same contract as _generate_reply_deepseek, via the Claude API instead."""
+    system_prompt = build_system_prompt(kb_context, profile_block, segment)
+    messages = user_data["history"][-MAX_HISTORY:]
+    # Claude requires the first message be role "user" (unlike the
+    # OpenAI-compatible shape DeepSeek accepts) — a slice that happens to
+    # start on "assistant" would otherwise get rejected outright.
+    while messages and messages[0].get("role") != "user":
+        messages = messages[1:]
+    try:
+        resp = _anthropic_client().messages.create(
+            model=CLAUDE_MODEL,
+            max_tokens=600,
+            system=system_prompt,
+            messages=messages,
+            # Simple grounded Q&A, not a hard multi-step task — low effort
+            # keeps latency and cost down without giving up faithfulness to
+            # the KB (that's the system prompt's job, not thinking depth).
+            output_config={"effort": "low"},
+        )
+        text = "".join(b.text for b in resp.content if b.type == "text").strip()
+        if resp.stop_reason == "max_tokens":
+            logger.warning("LLM reply truncated at max_tokens — trimming to last complete sentence")
+            sentences = re.split(r"(?<=[.!?])\s+", text)
+            if len(sentences) > 1:
+                text = " ".join(sentences[:-1]).strip()
+        unanswered = text.startswith(UNANSWERED_MARKER)
+        if unanswered:
+            text = text[len(UNANSWERED_MARKER):].lstrip()
+        return text, unanswered
+    except Exception as e:
+        logger.error(f"LLM error (claude): {e}")
+        return (
+            "Sorry, I glitched for a second there — could you send that again? "
+            "I'm happy to help with anything about working at Recykal, any time. 😊"
+        ), False
+
+
+def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
     """Call DeepSeek with retrieved KB context + candidate profile + recent
     history. Returns (reply_text, unanswered) — unanswered is True only when
     the model tagged this as a genuine knowledge-base gap (see UNANSWERED_MARKER)."""
@@ -950,13 +1059,24 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
         ), False
 
 
-def whatsapp_reply(phone: str, text: str) -> Response:
+def whatsapp_reply(phone: str, text: str, with_feedback_buttons: bool = False) -> Response:
     """Deliver a reply and return the HTTP response the webhook itself
     should send. Twilio expects the reply inline as TwiML; Meta's Cloud API
     has no such mechanism — the webhook response must just be a bare 200,
-    and the reply is a separate authenticated call to the Graph API."""
+    and the reply is a separate authenticated call to the Graph API.
+    with_feedback_buttons is Meta-only (Twilio has no equivalent freeform
+    button here — would need an approved template) and falls back to a
+    plain send if the interactive send fails for any reason (e.g. Meta's
+    shorter body-length limit on interactive messages vs. plain text) —
+    losing the buttons is fine, losing the reply itself isn't."""
     if WHATSAPP_PROVIDER == "meta":
-        ok, detail = send_meta_text(phone, text)
+        ok, detail = False, ""
+        if with_feedback_buttons:
+            ok, detail = send_meta_interactive_buttons(phone, text)
+            if not ok:
+                logger.warning(f"Feedback-button send failed for {phone} ({detail}) — falling back to plain text")
+        if not ok:
+            ok, detail = send_meta_text(phone, text)
         if not ok:
             logger.error(f"Meta send failed to {phone}: {detail}")
         return Response(content="", status_code=200)
@@ -972,6 +1092,15 @@ def whatsapp_reply(phone: str, text: str) -> Response:
 # needs to cover the redelivery window, not survive a restart.
 _RECENTLY_PROCESSED_MESSAGE_IDS: "OrderedDict[str, None]" = OrderedDict()
 _MAX_RECENTLY_PROCESSED = 2000
+
+# Complementary to the message-id dedup above — that one only catches WhatsApp
+# redelivering the exact same message id. This catches a person impatiently
+# resending the identical text as a brand-new message (new id) before their
+# first send has been answered yet. Keyed on (phone, exact text), and always
+# discarded once this request finishes (success or error) — self-bounding,
+# never needs a size cap the way the id set does, since nothing lingers past
+# one request's lifetime under normal operation.
+_IN_FLIGHT_MESSAGES: set[tuple[str, str]] = set()
 
 
 def _already_processed(message_id: str | None) -> bool:
@@ -1004,6 +1133,7 @@ async def whatsapp_webhook_get(request: Request):
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     phone = None
+    in_flight_key = None
     try:
         if WHATSAPP_PROVIDER == "meta":
             raw_body = await request.body()
@@ -1015,13 +1145,14 @@ async def whatsapp_webhook(request: Request):
                 # Delivery/read status callback, or a payload with nothing to
                 # react to — acknowledge and move on, there's no reply to send.
                 return Response(content="", status_code=200)
-            phone, incoming_message, media, message_id = parsed
+            phone, incoming_message, media, message_id, button_reply_id = parsed
         else:
             form_data = await request.form()
             phone = form_data.get("From", "").replace("whatsapp:", "")
             incoming_message = (form_data.get("Body", "") or "").strip()
             media = parse_media_twilio(form_data)
             message_id = form_data.get("MessageSid")
+            button_reply_id = None  # Twilio path doesn't support feedback buttons (see send_meta_interactive_buttons)
 
         if _already_processed(message_id):
             # WhatsApp redelivered a webhook we already handled (usually
@@ -1030,11 +1161,33 @@ async def whatsapp_webhook(request: Request):
             logger.info(f"↩️ [WEBHOOK] Duplicate delivery of message {message_id} from {phone} — skipping")
             return Response(content="", status_code=200)
 
+        if button_reply_id in ("fb_up", "fb_down"):
+            # A tap on a feedback button — never goes through the KB/LLM
+            # pipeline. Attach it to this phone's most recent real Q&A (the
+            # only one it could be rating, since buttons go out at most
+            # once/day) and ack silently, per the "quiet, just record it" call.
+            rating = "up" if button_reply_id == "fb_up" else "down"
+            recent_questions = upload_manager.get_questions_for_session(phone)
+            last_question = recent_questions[-1]["question"] if recent_questions else ""
+            recent_history = get_user_data(phone).get("history", [])
+            last_answer = next(
+                (m["content"] for m in reversed(recent_history) if m.get("role") == "assistant"), ""
+            )
+            upload_manager.log_feedback(phone, last_question, last_answer, rating)
+            logger.info(f"⭐ [WEBHOOK] Feedback from {phone}: {rating}")
+            return Response(content="", status_code=200)
+
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
 
         if not EMPLOYEE_DIRECTORY.is_allowed(phone):
             logger.info(f"🚫 [WEBHOOK] {phone} not an Active/Resigned employee — sending fallback reply")
             return whatsapp_reply(phone, NOT_AN_EMPLOYEE_REPLY)
+
+        in_flight_key = (phone, incoming_message)
+        if in_flight_key in _IN_FLIGHT_MESSAGES:
+            logger.info(f"⏳ [WEBHOOK] Same message from {phone} still being answered — skipping resend")
+            return Response(content="", status_code=200)
+        _IN_FLIGHT_MESSAGES.add(in_flight_key)
 
         sync_knowledge_from_drive()
 
@@ -1053,8 +1206,8 @@ async def whatsapp_webhook(request: Request):
 
         # Genuine empty ping (no text AND no attachment) → greeting.
         if not incoming_message and not media:
-            hello = f"Hey {first_name}! 👋" if first_name else "Hey! 👋"
-            reply = f"{hello} I'm your buddy at Recykal, from the People & Culture team. How can I help with your onboarding today?"
+            hello = f"Hey {first_name}!" if first_name else "Hey!"
+            reply = f"{hello} 👋 Welcome — I'm your Recykal Buddy. So glad to have you here! How can I help you today? 😊"
             if should_ask_segment:
                 reply += SEGMENT_QUESTION
             if show_disclaimer:
@@ -1099,11 +1252,22 @@ async def whatsapp_webhook(request: Request):
             reply += SEGMENT_QUESTION
         if show_disclaimer:
             reply += FIRST_MESSAGE_DISCLAIMER
+
+        # At most one feedback-button prompt per phone per (server-local)
+        # calendar day, attached to that day's first real answer — every
+        # other reply that day stays plain text. Meta-only (see whatsapp_reply).
+        today_str = datetime.now().date().isoformat()
+        show_feedback_buttons = (
+            WHATSAPP_PROVIDER == "meta" and user_data.get("last_feedback_prompted_date") != today_str
+        )
+        if show_feedback_buttons:
+            user_data["last_feedback_prompted_date"] = today_str
+
         user_data["history"].append({"role": "assistant", "content": reply})
         touch_last_message(user_data)
         save_user_data(phone, user_data)
 
-        return whatsapp_reply(phone, reply)
+        return whatsapp_reply(phone, reply, with_feedback_buttons=show_feedback_buttons)
 
     except Exception as e:
         logger.error(f"ERROR in webhook: {e}")
@@ -1118,6 +1282,9 @@ async def whatsapp_webhook(request: Request):
         resp = MessagingResponse()
         resp.message(apology)
         return Response(content=str(resp), media_type="application/xml")
+    finally:
+        if in_flight_key:
+            _IN_FLIGHT_MESSAGES.discard(in_flight_key)
 
 
 # --- Web chat (browser testing of the same bot, no WhatsApp needed) --------
@@ -1713,6 +1880,7 @@ async def list_whatsapp_sessions(current_user: dict = Depends(require_admin)):
         for s in sessions:
             s["name"] = EMPLOYEE_DIRECTORY.name_of(s["phone"])
             s["emp_id"] = EMPLOYEE_DIRECTORY.emp_id_of(s["phone"])
+            s["feedback"] = upload_manager.get_feedback_summary(s["phone"])
         return JSONResponse({"success": True, "sessions": sessions})
     except Exception as e:
         logger.error(f"List WhatsApp sessions error: {e}")
@@ -1804,6 +1972,9 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
                     pending_user = None
             used = [False] * len(pairs)
 
+            feedback_entries = upload_manager.get_feedback_for_session(phone)
+            feedback_used = [False] * len(feedback_entries)
+
             for q in upload_manager.get_questions_for_session(phone):
                 answer = ""
                 # Match by exact text against the earliest unused pair —
@@ -1816,12 +1987,21 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
                         used[i] = True
                         answer = a
                         break
+
+                feedback = ""
+                for i, fb in enumerate(feedback_entries):
+                    if not feedback_used[i] and answer and fb["answer"] == answer:
+                        feedback_used[i] = True
+                        feedback = "👍" if fb["rating"] == "up" else "👎"
+                        break
+
                 all_rows.append({
                     "name": name,
                     "emp_id": emp_id,
                     "phone": phone,
                     "question": q["question"],
                     "answer": answer,
+                    "feedback": feedback,
                     "answered": "No" if q["unanswered"] else "Yes",
                     "segment": q["segment"] or "",
                     "asked_at": q["asked_at"] or "",
@@ -1830,12 +2010,12 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
         wb = Workbook()
         ws1 = wb.active
         ws1.title = "Q&A Log"
-        ws1.append(["Name", "Emp ID", "Phone", "Question", "Answer", "Answered", "Segment", "Asked At"])
+        ws1.append(["Name", "Emp ID", "Phone", "Question", "Answer", "Feedback", "Answered", "Segment", "Asked At"])
         for cell in ws1[1]:
             cell.font = Font(bold=True)
         for r in all_rows:
-            ws1.append([r["name"], r["emp_id"], r["phone"], r["question"], r["answer"], r["answered"], r["segment"], r["asked_at"]])
-        for col, width in zip("ABCDEFGH", [20, 14, 16, 50, 60, 10, 12, 20]):
+            ws1.append([r["name"], r["emp_id"], r["phone"], r["question"], r["answer"], r["feedback"], r["answered"], r["segment"], r["asked_at"]])
+        for col, width in zip("ABCDEFGHI", [20, 14, 16, 50, 60, 10, 10, 12, 20]):
             ws1.column_dimensions[col].width = width
 
         ws2 = wb.create_sheet("Grouped Questions")
@@ -1886,6 +2066,7 @@ async def get_whatsapp_chat_transcript(phone: str, current_user: dict = Depends(
             "phone": normalized,
             "history": data.get("history", []),
             "questions": questions,
+            "feedback": upload_manager.get_feedback_for_session(normalized),
         })
     except Exception as e:
         logger.error(f"Get WhatsApp chat transcript error: {e}")
