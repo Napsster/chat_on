@@ -15,6 +15,7 @@ import hmac
 import hashlib
 import logging
 import mimetypes
+from collections import OrderedDict
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
@@ -763,10 +764,10 @@ def verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool
     return hmac.compare_digest(expected, signature_header.split("=", 1)[1])
 
 
-def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict]] | None:
-    """Extract (phone, text, media_items) from a Cloud API webhook payload.
-    Returns None for events with nothing to react to — delivery/read status
-    callbacks arrive on the same webhook and carry no "messages" key."""
+def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None] | None:
+    """Extract (phone, text, media_items, message_id) from a Cloud API webhook
+    payload. Returns None for events with nothing to react to — delivery/read
+    status callbacks arrive on the same webhook and carry no "messages" key."""
     try:
         value = payload["entry"][0]["changes"][0]["value"]
     except (KeyError, IndexError, TypeError):
@@ -785,7 +786,7 @@ def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict]] | None:
         text = (sub.get("caption") or "").strip()
         if sub.get("id"):
             media.append({"id": sub["id"], "content_type": sub.get("mime_type", "")})
-    return phone, text, media
+    return phone, text, media, msg.get("id")
 
 
 def save_media_meta(phone: str, media: list[dict]) -> list[dict]:
@@ -964,6 +965,28 @@ def whatsapp_reply(phone: str, text: str) -> Response:
     return Response(content=str(resp), media_type="application/xml")
 
 
+# WhatsApp providers redeliver the same webhook event if this endpoint takes
+# too long to respond (LLM call + retrieval + directory/drive checks can
+# exceed that window) — without this, each redelivery of the same incoming
+# message triggered a fresh duplicate reply. Bounded size, not a TTL: only
+# needs to cover the redelivery window, not survive a restart.
+_RECENTLY_PROCESSED_MESSAGE_IDS: "OrderedDict[str, None]" = OrderedDict()
+_MAX_RECENTLY_PROCESSED = 2000
+
+
+def _already_processed(message_id: str | None) -> bool:
+    """False the first time a message id is seen (and records it); True on
+    every subsequent call with the same id — that's the redelivery check."""
+    if not message_id:
+        return False  # no id to dedup on (e.g. Twilio form missing MessageSid) — process as usual
+    if message_id in _RECENTLY_PROCESSED_MESSAGE_IDS:
+        return True
+    _RECENTLY_PROCESSED_MESSAGE_IDS[message_id] = None
+    if len(_RECENTLY_PROCESSED_MESSAGE_IDS) > _MAX_RECENTLY_PROCESSED:
+        _RECENTLY_PROCESSED_MESSAGE_IDS.popitem(last=False)
+    return False
+
+
 @app.get("/whatsapp")
 async def whatsapp_webhook_get(request: Request):
     if WHATSAPP_PROVIDER == "meta":
@@ -992,12 +1015,20 @@ async def whatsapp_webhook(request: Request):
                 # Delivery/read status callback, or a payload with nothing to
                 # react to — acknowledge and move on, there's no reply to send.
                 return Response(content="", status_code=200)
-            phone, incoming_message, media = parsed
+            phone, incoming_message, media, message_id = parsed
         else:
             form_data = await request.form()
             phone = form_data.get("From", "").replace("whatsapp:", "")
             incoming_message = (form_data.get("Body", "") or "").strip()
             media = parse_media_twilio(form_data)
+            message_id = form_data.get("MessageSid")
+
+        if _already_processed(message_id):
+            # WhatsApp redelivered a webhook we already handled (usually
+            # because the first delivery took too long to get a response) —
+            # skip reprocessing so the person doesn't get the same reply twice.
+            logger.info(f"↩️ [WEBHOOK] Duplicate delivery of message {message_id} from {phone} — skipping")
+            return Response(content="", status_code=200)
 
         logger.info(f"📨 [WEBHOOK] From: {phone} | Message: {incoming_message} | media: {len(media)}")
 
