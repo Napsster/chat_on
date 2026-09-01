@@ -364,6 +364,12 @@ right now actually contains the answer, use it and answer properly this time. Do
 consistent with your own earlier wrong deflection out of some sense of continuity — a fresh, \
 correct answer is always better than repeating an old mistake. Re-check the KNOWLEDGE BASE CONTEXT \
 for THIS reply on its own merits every time, regardless of what was said before.
+- This applies to WORDING too, not just facts. If this system prompt specifies exact phrasing for a \
+fixed message (e.g. the out-of-scope deflection, or the {UNANSWERED_MARKER} deflection), use that \
+current phrasing fresh, in this reply, even if earlier turns in this same conversation used \
+different (older) wording for the same kind of message — a long back-and-forth of repeated \
+off-topic questions, for instance, should not gradually settle into copying whatever phrasing you \
+happened to use a few turns ago instead of what's actually specified here now.
 
 ################  REAL PAST MISTAKES — DO NOT REPEAT THESE  ################
 These are actual wrong answers this bot gave before. Study the pattern, not just the topic \
@@ -579,6 +585,9 @@ insurance specifically. FBP eligibility is a different, separate exclusion list 
 third-party payroll employees too, along with Trainees/Interns/Consultants) — that FBP-specific \
 exclusion does NOT apply to insurance, so never cite it when answering an insurance question. When \
 answering an insurance question, stick to insurance-specific content only.
+- Investor/funding/backer questions: always present Institutional Investors first, then Family \
+Offices / Individual Investors second — never list an individual/family-office investor before an \
+institutional one, regardless of the order they appear in the KNOWLEDGE BASE.
 - Leadership queries for a specific Business Unit or Function (e.g. "who is heading EPR?", "who \
 leads Technology?", "who is responsible for Compliance?", "who is the P&L owner for EPR?"): do NOT \
 default to calling anyone "Head of X", and NEVER use the term "P&L Owner" (or "Primary/Secondary \
@@ -636,8 +645,11 @@ historical information if the person explicitly asks for it.
 
 ################  YOUR GOAL  ################
 Help the person you're chatting with feel welcomed and get their questions answered accurately \
-from the KNOWLEDGE BASE. If they ask something out of scope, gently deflect and steer back to \
-how you can help."""
+from the KNOWLEDGE BASE. If they ask something out of scope (unrelated to Recykal entirely — not \
+just a knowledge-base gap), gently deflect using this exact idea, in your own words: "I'm here to \
+help with Recykal-related questions 😊 — including People & Culture, policies, benefits, processes, \
+events, and other workplace support. I may not be able to help with topics outside Recykal, but \
+feel free to ask me anything related to your work at Recykal!" """
 
 
 SEGMENT_FRAMING = {
@@ -1614,7 +1626,8 @@ async def whatsapp_webhook(request: Request):
         # user saying "hi" mid-relationship gets a normal contextual reply,
         # not reset back to the canned welcome.
         first_message_greeting = not user_data["history"] and not media and _is_plain_greeting(incoming_message)
-        if (not incoming_message and not media) or first_message_greeting:
+        empty_ping = not incoming_message and not media
+        if (empty_ping and not user_data["history"]) or first_message_greeting:
             hello = f"Hey {first_name}!" if first_name else "Hey!"
             reply = f"{hello} 👋 Welcome — I'm your Recykal Buddy. So glad to have you here! How can I help you today? 😊"
             if should_ask_segment:
@@ -1625,6 +1638,15 @@ async def whatsapp_webhook(request: Request):
             touch_last_message(user_data)
             save_user_data(phone, user_data)
             return whatsapp_reply(phone, reply)
+        if empty_ping:
+            # A genuinely empty message from someone who already has a real
+            # conversation going (e.g. an accidental blank send) — confirmed
+            # in production: this used to fall through to the "brand new
+            # user" welcome text above regardless of history, resetting an
+            # ongoing conversation back to onboarding language mid-chat.
+            # Scoped the same way the plain-greeting shortcut already is —
+            # only genuinely brand-new sessions get the full welcome.
+            return whatsapp_reply(phone, "Hey! 😊 What can I help you with?")
 
         # opportunistic email capture
         if incoming_message and not user_data.get("email"):
