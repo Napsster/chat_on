@@ -715,23 +715,44 @@ def retrieve_context(message: str, segment: str | None = None, extra_query: str 
     # month, and a vague query like "what's the next event" embeds about
     # equally close to EVERY month's chunk — nothing in plain semantic
     # similarity favors September over March just because September happens
-    # to be chronologically next. Blending the month/year into the user's
-    # own (often noisy) question was tried and didn't reliably win against
-    # the other 11 months either. Since the server always knows today's
-    # real date, run a separate, deliberately narrow search on just the
-    # current and next month's name — nothing else blended in — and fold
-    # its top hits in unconditionally. Confirmed directly: a bare "September
-    # 2026" query ranks the September chunk #1, every time. Cheap (local
-    # embedding, no LLM call), and harmless when there's no calendar-style
-    # content to match — it just adds a low-relevance chunk in that case.
+    # to be chronologically next. Tried blending the month/year into the
+    # query (didn't reliably win against the other 11 months) and running it
+    # as its own separate embedding search (also unreliable — a short,
+    # near-empty "no data this month" chunk from an unrelated month can
+    # outrank the real content purely on text-similarity noise). Embeddings
+    # fundamentally can't do "which month comes next" — that's date
+    # arithmetic, not semantics. Since the server always knows today's real
+    # date and this doc's structure exactly, skip the embedding search for
+    # this and pull the current + next month's section directly by heading
+    # text match instead — guaranteed correct regardless of how the
+    # question is phrased.
+    for month_section in _current_calendar_months(base):
+        if month_section not in seen:
+            seen.add(month_section)
+            merged.append(month_section)
+    return "\n\n---\n\n".join(merged) if merged else base
+
+
+def _current_calendar_months(base_text: str) -> list[str]:
+    """Pull the current + next month's "## <Month> <Year>" section straight
+    out of the compiled knowledge text by exact heading match — see the
+    comment above retrieve_context's call site for why this bypasses vector
+    search entirely instead of hoping retrieval finds it. Returns [] if no
+    such heading exists in this segment's knowledge (e.g. pre_join, which
+    has no engagement calendar) — safe no-op."""
     now = datetime.now(IST)
     next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
-    for month_q in (now.strftime("%B %Y"), next_month.strftime("%B %Y")):
-        for c in vstore.retrieve(month_q, k=3):
-            if c not in seen:
-                seen.add(c)
-                merged.append(c)
-    return "\n\n---\n\n".join(merged) if merged else base
+    sections = []
+    for d in (now, next_month):
+        heading = f"## {d.strftime('%B %Y')}"
+        idx = base_text.find(f"{heading}\n")
+        if idx == -1:
+            continue
+        rest = base_text[idx:]
+        end_match = re.search(r"\n(?:## |---)", rest[len(heading):])
+        end = len(heading) + end_match.start() if end_match else len(rest)
+        sections.append(f"[Source: current engagement calendar period]\n{rest[:end].strip()}")
+    return sections
 
 
 # --- Segment (pre_join / post_join) resolution ------------------------------
