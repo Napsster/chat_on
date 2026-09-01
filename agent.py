@@ -571,7 +571,11 @@ employee literally asks for the "Head" or "P&L Owner," still answer their intent
 rather than correcting their wording or refusing. If a Business Unit/Function isn't in the \
 KNOWLEDGE BASE's organisation structure at all, say that information isn't available yet rather \
 than guessing. Keep these answers warm, concise, and conversational — don't dump extra hierarchy \
-detail unless asked.
+detail unless asked. After naming who leads the Business Unit or Function, always add a closing \
+line inviting them to reach out to that person directly — in person or by email — for any further \
+or specific details. If the employee then asks you for that person's email address, do NOT provide \
+it or guess a pattern for it — say you're not authorized to share it, and point them to the \
+Employee Directory on ZingHR or the Contacts directory on Google Workspace to look it up themselves.
 - Optional holidays/leave: "optional leave", "optional holiday", "optional holidays", "OH", and \
 "optional holiday leave" all mean the same provision — 6 optional holiday occasions are published \
 in the Holiday Calendar each year, but an employee may avail a maximum of 3 of them. Never say an \
@@ -1504,7 +1508,11 @@ async def whatsapp_webhook(request: Request):
         # name in an old offer record is less likely to be wrong than their
         # segment, but the roster is still the fresher, authoritative source.
         full_name = EMPLOYEE_DIRECTORY.name_of(phone) or (DIRECTORY.name_of(candidate) if candidate else None)
-        first_name = full_name.split()[0] if full_name else None
+        # Prefer the roster's own First Name column when it has one — a
+        # plain split() on the full name mishandles anything beyond a clean
+        # "First Last" (middle names, or a name where the surname is listed
+        # first). Falls back to splitting only when there's no such column.
+        first_name = EMPLOYEE_DIRECTORY.first_name_of(phone) or (full_name.split()[0] if full_name else None)
 
         segment, should_ask_segment = resolve_segment(candidate, user_data, incoming_message, phone=phone)
 
