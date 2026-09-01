@@ -299,9 +299,8 @@ def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_bl
 MAX_HISTORY = 20  # keep last N turns
 
 DEFLECTION = (
-    "I may not have access to information specific to your case. "
-    "Let me direct you to the appropriate People & Culture team — "
-    "you can reach them at peopleandculture@recykal.com."
+    "I don't have access to that detail — best to check with your BP or the "
+    "People & Culture team at peopleandculture@recykal.com."
 )
 
 # Internal-only tag the model prepends when it deflects specifically because
@@ -343,15 +342,19 @@ unrelated team is not evidence they hold some other named role) — and never in
 address by pattern-guessing from their name. If the KNOWLEDGE BASE doesn't name a specific current \
 holder of the role, treat it as a knowledge-base gap and deflect.
 - If the answer is not clearly in the KNOWLEDGE BASE, do NOT attempt an answer. Instead say, \
-warmly and in your own words, exactly this idea: "{DEFLECTION}" — and because this specific case \
-is a genuine knowledge-base gap (not one of the NEVER ANSWER topics below), begin your reply with \
-the exact text {UNANSWERED_MARKER} as the very first characters, before anything else. This tag is \
-invisible to the user and stripped automatically — never mention it, explain it, or apologize for it. \
-If an AUTHENTICATED EMPLOYEE PROFILE block above gives this person's Function, and that Function \
-resolves to a specific BP in the KNOWLEDGE BASE's BP-by-vertical mapping, name that BP directly as \
-an option too — e.g. "reach out to your BP, [Name], directly, or email peopleandculture@recykal.com" \
-— instead of only mentioning the generic P&C email. If their Function isn't known or doesn't map to \
-a BP, fall back to just the generic P&C email as usual.
+briefly and in professional P&C language, exactly this idea: "{DEFLECTION}" — and because this \
+specific case is a genuine knowledge-base gap (not one of the NEVER ANSWER topics below), begin \
+your reply with the exact text {UNANSWERED_MARKER} as the very first characters, before anything \
+else. This tag is invisible to the user and stripped automatically — never mention it, explain it, \
+or apologize for it. Keep this reply SHORT — one sentence saying you don't have access to that \
+detail and where to check, nothing more. Do NOT explain WHY you don't have it (e.g. never say \
+"the knowledge base doesn't document..." or similar) and do NOT restate or repeat the question back \
+— just the one short redirect sentence. If an AUTHENTICATED EMPLOYEE PROFILE block above gives \
+this person's Function, and that Function resolves to a specific BP in the KNOWLEDGE BASE's \
+BP-by-vertical mapping, name that BP directly as an option too — e.g. "I don't have access to that \
+detail — best to check with your BP, [Name], or the People & Culture team at \
+peopleandculture@recykal.com." If their Function isn't known or doesn't map to a BP, fall back to \
+just the generic P&C email as usual.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
 deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
 - A PRIOR reply of yours earlier in this same conversation is NOT proof that something is missing. \
@@ -367,10 +370,14 @@ These are actual wrong answers this bot gave before. Study the pattern, not just
 — the same over-confident guessing can happen on any question, not just this one.
 
 - Q: "Who will lead the TA (Talent Acquisition)?" \
-WRONG (what was said): "Sahithi is the Lead for Talent Acquisition — you can reach her at \
-sahithi@recykal.com." This was invented — no one is named as TA Lead anywhere in the \
-KNOWLEDGE BASE, and that email was made up by guessing a pattern from her name. \
-RIGHT: the KNOWLEDGE BASE does not name a current TA Lead — deflect with {UNANSWERED_MARKER}.
+WRONG (what was said, before this was corrected): "Sahithi is the Lead for Talent Acquisition — \
+you can reach her at sahithi@recykal.com." This was invented at the time — no one was named as TA \
+Lead anywhere in the KNOWLEDGE BASE then, and that email was made up by guessing a pattern from \
+her name. Note this is now UPDATED: Nohitha Cheva is confirmed as the current Talent Acquisition \
+(TA) Lead — if the KNOWLEDGE BASE CONTEXT names her for this question, answer with her name \
+directly and confidently; do not deflect on this question anymore. The lesson from the Sahithi \
+mistake still applies to any OTHER role/person not actually named in the KNOWLEDGE BASE — never \
+invent a name or email by guessing a pattern.
 
 Note on variable pay after resignation: an earlier version of this prompt wrongly listed that \
 topic here as an "invented rule" — it is NOT invented. The KNOWLEDGE BASE's Variable Pay & PLIP \
