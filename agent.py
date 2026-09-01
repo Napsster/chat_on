@@ -8,8 +8,11 @@ documents and managing uploads, backed by SQLite (see file_upload_handler.py).
 """
 
 import os
+import asyncio
+import threading
 import subprocess
 import tempfile
+import shutil
 import re
 import json
 import time
@@ -203,19 +206,20 @@ def _anthropic_client():
 # scrubbedEnv, just applied to a chat reply instead of a coding-agent run.
 CLAUDE_CODE_OAUTH_TOKEN = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
 CLAUDE_CODE_BINARY = os.environ.get("CLAUDE_CODE_BINARY", "claude")
-_CLAUDE_CODE_ISOLATED_HOME = None
-_CLAUDE_CODE_ISOLATED_CWD = None
 
 
 def _claude_code_isolated_dirs() -> tuple[str, str]:
-    """Lazily create (once) a throwaway $HOME and working directory with
-    nothing in them — no .claude/settings.json, no CLAUDE.md — so this
-    process's personal Claude Code config can never bleed into a reply."""
-    global _CLAUDE_CODE_ISOLATED_HOME, _CLAUDE_CODE_ISOLATED_CWD
-    if _CLAUDE_CODE_ISOLATED_HOME is None:
-        _CLAUDE_CODE_ISOLATED_HOME = tempfile.mkdtemp(prefix="buddy-claude-code-home-")
-        _CLAUDE_CODE_ISOLATED_CWD = tempfile.mkdtemp(prefix="buddy-claude-code-cwd-")
-    return _CLAUDE_CODE_ISOLATED_HOME, _CLAUDE_CODE_ISOLATED_CWD
+    """Create a FRESH throwaway $HOME and working directory for THIS call
+    only — no .claude/settings.json, no CLAUDE.md, and never shared with a
+    concurrent call. Now that generate_reply() runs on a thread pool
+    (asyncio.to_thread), multiple calls can be in flight at once for
+    DIFFERENT conversations — the CLI keys its own session/memory state off
+    the cwd path, so two concurrent calls sharing one cwd could leak one
+    person's conversation into another's reply. Caller must clean these up
+    when done (see finally: block below)."""
+    home = tempfile.mkdtemp(prefix="buddy-claude-code-home-")
+    cwd = tempfile.mkdtemp(prefix="buddy-claude-code-cwd-")
+    return home, cwd
 
 
 def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
@@ -285,6 +289,11 @@ def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_bl
         # DeepSeek, so a CLI hiccup (timeout, bad token, crash) still gets
         # the user a real grounded answer instead of "something glitched."
         raise
+    finally:
+        # Each call gets its own throwaway folders (see _claude_code_isolated_dirs
+        # docstring) — clean them up so they don't pile up on disk under load.
+        shutil.rmtree(isolated_home, ignore_errors=True)
+        shutil.rmtree(isolated_cwd, ignore_errors=True)
 
 
 MAX_HISTORY = 20  # keep last N turns
@@ -340,6 +349,31 @@ the exact text {UNANSWERED_MARKER} as the very first characters, before anything
 invisible to the user and stripped automatically — never mention it, explain it, or apologize for it.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
 deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
+
+################  REAL PAST MISTAKES — DO NOT REPEAT THESE  ################
+These are actual wrong answers this bot gave before. Study the pattern, not just the topic \
+— the same over-confident guessing can happen on any question, not just these two.
+
+- Q: "Who will lead the TA (Talent Acquisition)?" \
+WRONG (what was said): "Sahithi is the Lead for Talent Acquisition — you can reach her at \
+sahithi@recykal.com." This was invented — no one is named as TA Lead anywhere in the \
+KNOWLEDGE BASE, and that email was made up by guessing a pattern from her name. \
+RIGHT: the KNOWLEDGE BASE does not name a current TA Lead — deflect with {UNANSWERED_MARKER}.
+
+- Q: "I resigned in July — do I get my variable pay?" \
+WRONG (what was said, TWICE, even after being told better — do not repeat this a third time): a \
+confident, detailed rule about eligibility being based on "active employment status on the \
+payout date" and separation-before-payout meaning no payout. This rule does NOT appear anywhere \
+in the KNOWLEDGE BASE — it was invented because it sounded plausible. Simply adding a hedge \
+afterward ("but check with People & Culture for your exact case") does NOT fix this — the \
+invented rule was still stated as fact first, and the user still walks away believing it. \
+RIGHT: the Variable Pay policy in the KNOWLEDGE BASE states join-date eligibility cutoffs and \
+the evaluation/payout cycle, but says nothing about what happens if someone resigns before \
+payout — that specific question is a knowledge-base gap. Do not state ANY eligibility mechanic, \
+rule, or outcome for the resignation scenario — hedged or not — that the KNOWLEDGE BASE doesn't \
+say. The entire reply must be the deflection itself (KNOWLEDGE BASE doesn't cover what happens \
+if you resign before a payout — check with People & Culture), with {UNANSWERED_MARKER} at the \
+very start — not a stated rule followed by a disclaimer.
 
 ################  NEVER ANSWER THESE (always deflect to People & Culture)  ################
 Even if related info appears in the KNOWLEDGE BASE, do not give individualized answers on:
@@ -523,6 +557,29 @@ their intent with the correct official terminology rather than correcting their 
 refusing. If a Business Unit/Function isn't in the KNOWLEDGE BASE's organisation structure at all, \
 say that information isn't available yet rather than guessing. Keep these answers warm, concise, \
 and conversational — don't dump extra hierarchy detail unless asked.
+- Optional holidays/leave: "optional leave", "optional holiday", "optional holidays", "OH", and \
+"optional holiday leave" all mean the same provision — 6 optional holiday occasions are published \
+in the Holiday Calendar each year, but an employee may avail a maximum of 3 of them. Never say an \
+employee can take all 6. Once separation is initiated (including the notice period), employees are \
+NOT eligible to avail optional leave/holidays at all — this is a hard restriction, not a reduced \
+number, so don't answer a post-resignation/notice-period/separation question about optional leave \
+with "up to 3" — the correct answer there is none.
+- BP / HRBP / Business Partner / HR Business Partner all refer to the exact same role and the same \
+underlying mapping — there is no separate "HRBP" data to look up. Whichever of these terms the \
+employee uses, resolve their function/vertical and answer with the BP mapped to it. Always phrase \
+the answer using "BP" or "Business Partner" — never use the word "HRBP" in the answer itself, even \
+though the question may have used it.
+- Vikram Prabakar's and Ekta Narain's current designations are CPTP and CIBO respectively — use \
+these for ANY query about them (whether asking "who are the CXOs", "who is Vikram/Ekta", "what is \
+their designation", or "who is the CPTP/CIBO"), even if an older title for either of them (e.g. \
+"CPO"/"CTO" for Vikram, "CBO" for Ekta) appears elsewhere in the KNOWLEDGE BASE — those are \
+outdated. Only mention an older designation if someone explicitly asks for historical/previous \
+titles.
+- General rule when the KNOWLEDGE BASE contains multiple versions of the same fact (a designation, \
+a BP mapping, a policy figure): always use the current/most-recently-corrected version, never an \
+older one, and give the same answer regardless of how the question is phrased — don't let wording \
+differences cause you to pull a different (stale) version of the same fact. Only surface older/\
+historical information if the person explicitly asks for it.
 
 ################  YOUR GOAL  ################
 Help the person you're chatting with feel welcomed and get their questions answered accurately \
@@ -670,12 +727,37 @@ def parse_segment_reply(text: str) -> str | None:
     return None
 
 
-def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: str) -> tuple[str | None, bool]:
+# Plain greeting-only text, no real question in it — treated the same as a
+# genuinely empty first message (see the WEBHOOK "first_message_greeting"
+# check) so the fixed welcome wording is what's shown, not an LLM paraphrase.
+_PLAIN_GREETINGS = {"hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "heyo", "hola", "yo", "hlo"}
+
+
+def _is_plain_greeting(text: str) -> bool:
+    normalized = re.sub(r"[^a-z]", "", text.lower())
+    return normalized in _PLAIN_GREETINGS
+
+
+def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: str, phone: str | None = None) -> tuple[str | None, bool]:
     """Returns (segment, should_ask). Mutates user_data in place (segment /
     segment_asked) — caller just needs to save_user_data afterward.
 
-    Priority: candidate directory signal > previously stored answer > ask once
-    (parsing the next message as the answer) > give up, stay unsegmented."""
+    Priority: confirmed current employee > candidate directory signal >
+    previously stored answer > ask once (parsing the next message as the
+    answer) > give up, stay unsegmented.
+
+    The employee-roster check comes first, above the candidate directory,
+    because the candidate/"onboarding log" sheet is never cleaned up after
+    someone actually joins — its rows are offer records, not live status,
+    so a person hired years ago can still sit there as "Offer Status:
+    Accepted, Trainee" forever. Without this check that stale row wins over
+    even the post_join default below, permanently pre-join-framing someone
+    who's been an active employee for years (confirmed live: exactly this,
+    for a phone number whose 2022 offer record never got removed)."""
+    if phone and EMPLOYEE_DIRECTORY.is_allowed(phone):
+        user_data["segment"] = "post_join"
+        return "post_join", False
+
     directory_segment = DIRECTORY.segment_of(candidate) if candidate else None
     if directory_segment:
         user_data["segment"] = directory_segment
@@ -1214,18 +1296,26 @@ _MAX_RECENTLY_PROCESSED = 2000
 # one request's lifetime under normal operation.
 _IN_FLIGHT_MESSAGES: set[tuple[str, str]] = set()
 
+# Both dedup sets above are check-then-set — safe under the old strictly
+# sequential (one request at a time) model, but generate_reply now runs in
+# a real OS thread (see asyncio.to_thread at the call site), so two
+# messages can genuinely race on the same check-then-set at once. One lock
+# shared by both, held only for the few microseconds of the check+mutate.
+_DEDUP_LOCK = threading.Lock()
+
 
 def _already_processed(message_id: str | None) -> bool:
     """False the first time a message id is seen (and records it); True on
     every subsequent call with the same id — that's the redelivery check."""
     if not message_id:
         return False  # no id to dedup on (e.g. Twilio form missing MessageSid) — process as usual
-    if message_id in _RECENTLY_PROCESSED_MESSAGE_IDS:
-        return True
-    _RECENTLY_PROCESSED_MESSAGE_IDS[message_id] = None
-    if len(_RECENTLY_PROCESSED_MESSAGE_IDS) > _MAX_RECENTLY_PROCESSED:
-        _RECENTLY_PROCESSED_MESSAGE_IDS.popitem(last=False)
-    return False
+    with _DEDUP_LOCK:
+        if message_id in _RECENTLY_PROCESSED_MESSAGE_IDS:
+            return True
+        _RECENTLY_PROCESSED_MESSAGE_IDS[message_id] = None
+        if len(_RECENTLY_PROCESSED_MESSAGE_IDS) > _MAX_RECENTLY_PROCESSED:
+            _RECENTLY_PROCESSED_MESSAGE_IDS.popitem(last=False)
+        return False
 
 
 @app.get("/whatsapp")
@@ -1296,10 +1386,11 @@ async def whatsapp_webhook(request: Request):
             return whatsapp_reply(phone, NOT_AN_EMPLOYEE_REPLY)
 
         in_flight_key = (phone, incoming_message)
-        if in_flight_key in _IN_FLIGHT_MESSAGES:
-            logger.info(f"⏳ [WEBHOOK] Same message from {phone} still being answered — skipping resend")
-            return Response(content="", status_code=200)
-        _IN_FLIGHT_MESSAGES.add(in_flight_key)
+        with _DEDUP_LOCK:
+            if in_flight_key in _IN_FLIGHT_MESSAGES:
+                logger.info(f"⏳ [WEBHOOK] Same message from {phone} still being answered — skipping resend")
+                return Response(content="", status_code=200)
+            _IN_FLIGHT_MESSAGES.add(in_flight_key)
 
         sync_knowledge_from_drive()
 
@@ -1309,15 +1400,25 @@ async def whatsapp_webhook(request: Request):
         # Match the caller against the onboarding log (if configured).
         candidate = DIRECTORY.lookup(phone)
         profile_block = DIRECTORY.profile_block(candidate) if candidate else None
-        first_name = None
-        if candidate:
-            full = DIRECTORY.name_of(candidate)
-            first_name = full.split()[0] if full else None
+        # Employee roster name preferred over the candidate/offer sheet's —
+        # same staleness reasoning as the segment check above, a person's
+        # name in an old offer record is less likely to be wrong than their
+        # segment, but the roster is still the fresher, authoritative source.
+        full_name = EMPLOYEE_DIRECTORY.name_of(phone) or (DIRECTORY.name_of(candidate) if candidate else None)
+        first_name = full_name.split()[0] if full_name else None
 
-        segment, should_ask_segment = resolve_segment(candidate, user_data, incoming_message)
+        segment, should_ask_segment = resolve_segment(candidate, user_data, incoming_message, phone=phone)
 
-        # Genuine empty ping (no text AND no attachment) → greeting.
-        if not incoming_message and not media:
+        # Genuine empty ping, OR a plain "hi"/"hello" as someone's very first
+        # message → the fixed greeting, not the LLM's own paraphrase. Without
+        # this, only a truly empty message (rare — most people type "hi")
+        # got the exact wording HR asked for; anything with real text went
+        # through generate_reply instead, which writes its own (different
+        # every time) greeting. Scoped to an empty history so a returning
+        # user saying "hi" mid-relationship gets a normal contextual reply,
+        # not reset back to the canned welcome.
+        first_message_greeting = not user_data["history"] and not media and _is_plain_greeting(incoming_message)
+        if (not incoming_message and not media) or first_message_greeting:
             hello = f"Hey {first_name}!" if first_name else "Hey!"
             reply = f"{hello} 👋 Welcome — I'm your Recykal Buddy. So glad to have you here! How can I help you today? 😊"
             if should_ask_segment:
@@ -1356,7 +1457,12 @@ async def whatsapp_webhook(request: Request):
             blended = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
             kb_context = retrieve_context(incoming_message, segment, extra_query=blended)
         user_data["history"].append({"role": "user", "content": user_turn})
-        reply, unanswered = generate_reply(user_data, kb_context, profile_block, segment)
+        # Run off the event loop thread: generate_reply's DeepSeek/Claude-API
+        # paths already block on network I/O, and claude_code_cli blocks on
+        # a slow subprocess (~15-20s) — without to_thread, that one call
+        # would stall the entire server, queuing every other incoming
+        # WhatsApp message behind it instead of answering them concurrently.
+        reply, unanswered = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block, segment)
         if not media:
             # Document-upload turns are synthetic, not a real question — skip logging those.
             upload_manager.log_question(phone, "whatsapp", incoming_message, unanswered, segment)
@@ -1370,7 +1476,14 @@ async def whatsapp_webhook(request: Request):
         # other reply that day stays plain text. Meta-only (see whatsapp_reply).
         today_str = datetime.now().date().isoformat()
         show_feedback_buttons = (
-            WHATSAPP_PROVIDER == "meta" and user_data.get("last_feedback_prompted_date") != today_str
+            WHATSAPP_PROVIDER == "meta"
+            and user_data.get("last_feedback_prompted_date") != today_str
+            # A bare "hi" from a returning conversation still reaches this
+            # normal-answer path (only a brand-new/empty history gets the
+            # fixed-greeting shortcut above) — nothing substantive there to
+            # rate, and consuming today's one feedback slot on it would mean
+            # their actual first real question doesn't get buttons at all.
+            and not _is_plain_greeting(incoming_message)
         )
         if show_feedback_buttons:
             user_data["last_feedback_prompted_date"] = today_str
@@ -1436,7 +1549,7 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         kb_context = retrieve_context(message, segment, extra_query=blended)
 
         user_data["history"].append({"role": "user", "content": message})
-        reply, unanswered = generate_reply(user_data, kb_context, profile_block=None, segment=segment)
+        reply, unanswered = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block=None, segment=segment)
         upload_manager.log_question(session_key, "web", message, unanswered, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
