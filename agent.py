@@ -346,7 +346,12 @@ holder of the role, treat it as a knowledge-base gap and deflect.
 warmly and in your own words, exactly this idea: "{DEFLECTION}" — and because this specific case \
 is a genuine knowledge-base gap (not one of the NEVER ANSWER topics below), begin your reply with \
 the exact text {UNANSWERED_MARKER} as the very first characters, before anything else. This tag is \
-invisible to the user and stripped automatically — never mention it, explain it, or apologize for it.
+invisible to the user and stripped automatically — never mention it, explain it, or apologize for it. \
+If an AUTHENTICATED EMPLOYEE PROFILE block above gives this person's Function, and that Function \
+resolves to a specific BP in the KNOWLEDGE BASE's BP-by-vertical mapping, name that BP directly as \
+an option too — e.g. "reach out to your BP, [Name], directly, or email peopleandculture@recykal.com" \
+— instead of only mentioning the generic P&C email. If their Function isn't known or doesn't map to \
+a BP, fall back to just the generic P&C email as usual.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
 deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
 - A PRIOR reply of yours earlier in this same conversation is NOT proof that something is missing. \
@@ -555,6 +560,10 @@ to their BP (Business Partner) — do not attempt to troubleshoot the login your
 - Adding a spouse or newborn child to Onsurity/insurance after getting married or having a child: \
 tell them to email peopleandculture@recykal.com within 30 days of the marriage or birth to request \
 the change.
+- Trainees (along with Interns, Consultants, and employees on AWF payroll) are NOT eligible for \
+Onsurity/insurance coverage. Only mention this exclusion when someone specifically asks about \
+trainee/intern/consultant insurance eligibility — do not volunteer it when answering a general \
+insurance question.
 - Leadership queries for a specific Business Unit or Function (e.g. "who is heading EPR?", "who \
 leads Technology?", "who is responsible for Compliance?", "who is the P&L owner for EPR?"): do NOT \
 default to calling anyone "Head of X", and NEVER use the term "P&L Owner" (or "Primary/Secondary \
@@ -746,20 +755,40 @@ def retrieve_context(message: str, segment: str | None = None, extra_query: str 
         if month_section not in seen:
             seen.add(month_section)
             merged.append(month_section)
+    # A named event further out than the rolling window above (e.g. asking
+    # about a specific holiday/celebration by name, months in advance) still
+    # needs to be findable without bloating every message with the entire
+    # ~27k-char calendar — scan for the specific month it's actually in.
+    for month_section in _keyword_calendar_sections(message, base):
+        if month_section not in seen:
+            seen.add(month_section)
+            merged.append(month_section)
     return "\n\n---\n\n".join(merged) if merged else base
 
 
+_CALENDAR_MONTHS_AHEAD = 4  # current month + this many months forward
+
+
 def _current_calendar_months(base_text: str) -> list[str]:
-    """Pull the current + next month's "## <Month> <Year>" section straight
-    out of the compiled knowledge text by exact heading match — see the
-    comment above retrieve_context's call site for why this bypasses vector
-    search entirely instead of hoping retrieval finds it. Returns [] if no
-    such heading exists in this segment's knowledge (e.g. pre_join, which
-    has no engagement calendar) — safe no-op."""
-    now = datetime.now(IST)
-    next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+    """Pull the current + next few months' "## <Month> <Year>" sections
+    straight out of the compiled knowledge text by exact heading match — see
+    the comment above retrieve_context's call site for why this bypasses
+    vector search entirely instead of hoping retrieval finds it. Named
+    events further out than "next month" (e.g. Annual Day, ~3 months
+    ahead) need a wide enough window here, since a query naming the event
+    itself ("when will be annual day") carries no month keyword to search
+    on — a bare "next event"/"upcoming" query would still be answered from
+    whichever of these months has the earliest date. Returns [] if no such
+    heading exists in this segment's knowledge (e.g. pre_join, which has no
+    engagement calendar) — safe no-op."""
+    months = []
+    d = datetime.now(IST)
+    for _ in range(_CALENDAR_MONTHS_AHEAD):
+        months.append(d)
+        d = (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
     sections = []
-    for d in (now, next_month):
+    for d in months:
         heading = f"## {d.strftime('%B %Y')}"
         idx = base_text.find(f"{heading}\n")
         if idx == -1:
@@ -768,6 +797,51 @@ def _current_calendar_months(base_text: str) -> list[str]:
         end_match = re.search(r"\n(?:## |---)", rest[len(heading):])
         end = len(heading) + end_match.start() if end_match else len(rest)
         sections.append(f"[Source: current engagement calendar period]\n{rest[:end].strip()}")
+    return sections
+
+
+_CALENDAR_QUERY_STOPWORDS = {
+    "what", "when", "will", "the", "are", "any", "have", "upcoming", "event", "events",
+    "next", "check", "please", "could", "would", "tell", "know", "about", "there", "does",
+    "this", "that", "with", "from", "your", "recykal", "company", "date", "dates",
+}
+
+
+def _keyword_calendar_sections(message: str, base_text: str) -> list[str]:
+    """A named event further out than the rolling window (see
+    _CALENDAR_MONTHS_AHEAD) — e.g. asking about a specific holiday or
+    celebration by name months in advance — still needs to be findable, and
+    a month-name-only window can't cover every date in the year without
+    bloating every single message's context with the whole ~27k-char
+    calendar. Instead, scan the message for distinctive words (skipping
+    generic ones) and, for any that appear verbatim in the calendar text,
+    pull in the specific month section that word occurs in — a cheap,
+    deterministic full-document search, not a fixed lookahead window."""
+    words = [w for w in re.findall(r"[a-zA-Z]{4,}", message.lower()) if w not in _CALENDAR_QUERY_STOPWORDS]
+    if not words:
+        return []
+    headings = [(m.start(), m.group(0)) for m in re.finditer(r"^## \w+ \d{4}$", base_text, re.M)]
+    if not headings:
+        return []
+    matched_headings: set[str] = set()
+    lower_base = base_text.lower()
+    for w in words:
+        pos = lower_base.find(w)
+        if pos == -1:
+            continue
+        # last heading whose position is before this match
+        containing = max((h for h in headings if h[0] <= pos), key=lambda h: h[0], default=None)
+        if containing:
+            matched_headings.add(containing[1])
+    sections = []
+    for heading in matched_headings:
+        idx = base_text.find(f"{heading}\n")
+        if idx == -1:
+            continue
+        rest = base_text[idx:]
+        end_match = re.search(r"\n(?:## |---)", rest[len(heading):])
+        end = len(heading) + end_match.start() if end_match else len(rest)
+        sections.append(f"[Source: engagement calendar, matched by keyword]\n{rest[:end].strip()}")
     return sections
 
 
