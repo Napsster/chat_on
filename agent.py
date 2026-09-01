@@ -572,9 +572,9 @@ conversation tone, or what seems likely. If this information is genuinely unavai
 KNOWLEDGE BASE gives conflicting answers for it, either ask one concise clarifying question, or — \
 if the question can be answered in general terms without needing the specific employee context — \
 give that general policy information instead of guessing.
-- Vikram Prabakar's and Ekta Narain's current designations are CPTO and CIBO respectively — use \
+- Vikram Prabakar's and Ekta Narain's current designations are CPTO and CBIO respectively — use \
 these for ANY query about them (whether asking "who are the CXOs", "who is Vikram/Ekta", "what is \
-their designation", or "who is the CPTO/CIBO"), even if an older title for either of them (e.g. \
+their designation", or "who is the CPTO/CBIO"), even if an older title for either of them (e.g. \
 "CPO"/"CTO" for Vikram, "CBO" for Ekta) appears elsewhere in the KNOWLEDGE BASE — those are \
 outdated. Only mention an older designation if someone explicitly asks for historical/previous \
 titles.
@@ -696,20 +696,28 @@ def retrieve_context(message: str, segment: str | None = None, extra_query: str 
     queries = [message]
     if extra_query and extra_query != message:
         queries.append(extra_query)
-    # Calendar/event content (holidays, engagement calendar) is embedded as
-    # raw dated table rows — a vague query like "upcoming events" matches on
-    # generic semantic similarity and can lose to unrelated noise (other
-    # docs that just happen to mention "Recykal" or "events"), or land on a
-    # stale month instead of the current one. Blending in the current
-    # month/year nudges retrieval toward whichever chunk actually covers
-    # *this* month, without needing to keyword-detect "is this a calendar
-    # question" first — cheap (local embedding, no LLM call) and safe to
-    # always add.
-    dated_query = f"{message} {datetime.now(IST).strftime('%B %Y')}"
-    if dated_query not in queries:
-        queries.append(dated_query)
     for q in queries:
         for c in vstore.retrieve(q, k=TOP_K):
+            if c not in seen:
+                seen.add(c)
+                merged.append(c)
+    # Calendar/event content (holidays, engagement calendar) is chunked by
+    # month, and a vague query like "what's the next event" embeds about
+    # equally close to EVERY month's chunk — nothing in plain semantic
+    # similarity favors September over March just because September happens
+    # to be chronologically next. Blending the month/year into the user's
+    # own (often noisy) question was tried and didn't reliably win against
+    # the other 11 months either. Since the server always knows today's
+    # real date, run a separate, deliberately narrow search on just the
+    # current and next month's name — nothing else blended in — and fold
+    # its top hits in unconditionally. Confirmed directly: a bare "September
+    # 2026" query ranks the September chunk #1, every time. Cheap (local
+    # embedding, no LLM call), and harmless when there's no calendar-style
+    # content to match — it just adds a low-relevance chunk in that case.
+    now = datetime.now(IST)
+    next_month = (now.replace(day=28) + timedelta(days=4)).replace(day=1)
+    for month_q in (now.strftime("%B %Y"), next_month.strftime("%B %Y")):
+        for c in vstore.retrieve(month_q, k=3):
             if c not in seen:
                 seen.add(c)
                 merged.append(c)
