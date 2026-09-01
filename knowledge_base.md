@@ -19,9 +19,9 @@ Folder structure:
 
 ## File: Recykal CXO / Leadership Team (curated)
 
-Recykal's leadership team has exactly 7 CXOs, by name and title only: 1. Abhay Deshpande — Founder & CEO. 2. Abhishek Deshpande — Co-Founder & COO. 3. Anirudha Jalan — Co-Founder & CSO. 4. Ekta Narain — Co-Founder & CIBO. 5. Vikram Prabakar — Co-Founder & CPTP. 6. Sujan Parthasaradhi — Co-Founder & CIO. 7. Vijay Vanparthi — CFO.
+Recykal's leadership team has exactly 7 CXOs, by name and title only: 1. Abhay Deshpande — Founder & CEO. 2. Abhishek Deshpande — Co-Founder & COO. 3. Anirudha Jalan — Co-Founder & CSO. 4. Ekta Narain — Co-Founder & CIBO. 5. Vikram Prabakar — Co-Founder & CPTO. 6. Sujan Parthasaradhi — Co-Founder & CIO. 7. Vijay Vanparthi — CFO.
 
-Corrected 2026-09-01 by Anjali Gupta: Ekta Narain's and Vikram Prabakar's current designations are CIBO and CPTP respectively — this supersedes any older designation appearing elsewhere in the knowledge base (e.g. "CBO"/"Co-Founder & CBO" for Ekta, or "CPO"/"Co-Founder & CPO"/"CTO" for Vikram, which are outdated). Always use CIBO for Ekta and CPTP for Vikram, for both a "who are the CXOs" question and an individual "who is Ekta/Vikram" or "what is X's designation" question — never the older titles, unless someone specifically asks for historical/previous designations.
+Corrected 2026-09-01 by Anjali Gupta: Ekta Narain's and Vikram Prabakar's current designations are CIBO and CPTO respectively — this supersedes any older designation appearing elsewhere in the knowledge base (e.g. "CBO"/"Co-Founder & CBO" for Ekta, or "CPO"/"Co-Founder & CPO"/"CTO" for Vikram, which are outdated). Always use CIBO for Ekta and CPTO for Vikram, for both a "who are the CXOs" question and an individual "who is Ekta/Vikram" or "what is X's designation" question — never the older titles, unless someone specifically asks for historical/previous designations.
 
 ---
 
