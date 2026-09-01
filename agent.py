@@ -568,7 +568,17 @@ with "up to 3" — the correct answer there is none.
 underlying mapping — there is no separate "HRBP" data to look up. Whichever of these terms the \
 employee uses, resolve their function/vertical and answer with the BP mapped to it. Always phrase \
 the answer using "BP" or "Business Partner" — never use the word "HRBP" in the answer itself, even \
-though the question may have used it.
+though the question may have used it. If an AUTHENTICATED EMPLOYEE PROFILE block above gives this \
+person's Function, use it to resolve the BP directly — do NOT ask "which function are you from?" \
+unless that Function value is missing or doesn't clearly map to anything in the BP-by-vertical \
+mapping.
+- Never guess an employee's identity, function/vertical, employment status, BP mapping, or policy \
+eligibility. Only ever state one of these as fact when it comes from the AUTHENTICATED EMPLOYEE \
+PROFILE block or is explicit in the KNOWLEDGE BASE — never infer it from name, phone number, \
+conversation tone, or what seems likely. If this information is genuinely unavailable or the \
+KNOWLEDGE BASE gives conflicting answers for it, either ask one concise clarifying question, or — \
+if the question can be answered in general terms without needing the specific employee context — \
+give that general policy information instead of guessing.
 - Vikram Prabakar's and Ekta Narain's current designations are CPTP and CIBO respectively — use \
 these for ANY query about them (whether asking "who are the CXOs", "who is Vikram/Ekta", "what is \
 their designation", or "who is the CPTP/CIBO"), even if an older title for either of them (e.g. \
@@ -962,15 +972,20 @@ def verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool
     return hmac.compare_digest(expected, signature_header.split("=", 1)[1])
 
 
-def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None, str | None] | None:
-    """Extract (phone, text, media_items, message_id, button_reply_id) from a
-    Cloud API webhook payload. button_reply_id is None for a normal message,
-    or e.g. "fb_up"/"fb_down" when this is a tap on a feedback button —
-    those carry no text/type Meta would otherwise put in msg["text"], so
-    without handling "interactive" explicitly they'd silently fall through
-    as an empty-text message and get treated as a greeting. Returns None for
-    events with nothing to react to — delivery/read status callbacks arrive
-    on the same webhook and carry no "messages" key."""
+def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None, str | None, str | None] | None:
+    """Extract (phone, text, media_items, message_id, button_reply_id,
+    context_message_id) from a Cloud API webhook payload. button_reply_id is
+    None for a normal message, or e.g. "fb_up"/"fb_down" when this is a tap
+    on a feedback button — those carry no text/type Meta would otherwise put
+    in msg["text"], so without handling "interactive" explicitly they'd
+    silently fall through as an empty-text message and get treated as a
+    greeting. context_message_id is the wamid of the message this one is a
+    reply to (WhatsApp always sets this for a button tap, since the tap is
+    technically a reply to the button message) — used to attribute a
+    feedback tap to the exact question it was for, not just "whatever's most
+    recent." Returns None for events with nothing to react to —
+    delivery/read status callbacks arrive on the same webhook and carry no
+    "messages" key."""
     try:
         value = payload["entry"][0]["changes"][0]["value"]
     except (KeyError, IndexError, TypeError):
@@ -983,6 +998,7 @@ def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None
     msg_type = msg.get("type", "text")
     media = []
     button_reply_id = None
+    context_message_id = (msg.get("context") or {}).get("id")
     if msg_type == "text":
         text = (msg.get("text", {}).get("body") or "").strip()
     elif msg_type == "interactive":
@@ -995,7 +1011,7 @@ def parse_incoming_meta(payload: dict) -> tuple[str, str, list[dict], str | None
         text = (sub.get("caption") or "").strip()
         if sub.get("id"):
             media.append({"id": sub["id"], "content_type": sub.get("mime_type", "")})
-    return phone, text, media, msg.get("id"), button_reply_id
+    return phone, text, media, msg.get("id"), button_reply_id, context_message_id
 
 
 def save_media_meta(phone: str, media: list[dict]) -> list[dict]:
@@ -1253,7 +1269,10 @@ def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: st
         ), False
 
 
-def whatsapp_reply(phone: str, text: str, with_feedback_buttons: bool = False) -> Response:
+def whatsapp_reply(
+    phone: str, text: str, with_feedback_buttons: bool = False,
+    feedback_question: str | None = None, feedback_answer: str | None = None,
+) -> Response:
     """Deliver a reply and return the HTTP response the webhook itself
     should send. Twilio expects the reply inline as TwiML; Meta's Cloud API
     has no such mechanism — the webhook response must just be a bare 200,
@@ -1262,13 +1281,20 @@ def whatsapp_reply(phone: str, text: str, with_feedback_buttons: bool = False) -
     button here — would need an approved template) and falls back to a
     plain send if the interactive send fails for any reason (e.g. Meta's
     shorter body-length limit on interactive messages vs. plain text) —
-    losing the buttons is fine, losing the reply itself isn't."""
+    losing the buttons is fine, losing the reply itself isn't.
+    feedback_question/feedback_answer (only meaningful with
+    with_feedback_buttons=True) get recorded against the sent message's
+    wamid, so a tap on these buttons — even a late one — can be attributed
+    to the exact question, not just "whatever's most recent." See
+    FeedbackPrompt."""
     if WHATSAPP_PROVIDER == "meta":
         ok, detail = False, ""
         if with_feedback_buttons:
             ok, detail = send_meta_interactive_buttons(phone, text)
             if not ok:
                 logger.warning(f"Feedback-button send failed for {phone} ({detail}) — falling back to plain text")
+            else:
+                upload_manager.record_feedback_prompt(detail, phone, feedback_question or "", feedback_answer or text)
         if not ok:
             ok, detail = send_meta_text(phone, text)
         if not ok:
@@ -1347,7 +1373,7 @@ async def whatsapp_webhook(request: Request):
                 # Delivery/read status callback, or a payload with nothing to
                 # react to — acknowledge and move on, there's no reply to send.
                 return Response(content="", status_code=200)
-            phone, incoming_message, media, message_id, button_reply_id = parsed
+            phone, incoming_message, media, message_id, button_reply_id, context_message_id = parsed
         else:
             form_data = await request.form()
             phone = form_data.get("From", "").replace("whatsapp:", "")
@@ -1355,6 +1381,7 @@ async def whatsapp_webhook(request: Request):
             media = parse_media_twilio(form_data)
             message_id = form_data.get("MessageSid")
             button_reply_id = None  # Twilio path doesn't support feedback buttons (see send_meta_interactive_buttons)
+            context_message_id = None
 
         if _already_processed(message_id):
             # WhatsApp redelivered a webhook we already handled (usually
@@ -1365,16 +1392,26 @@ async def whatsapp_webhook(request: Request):
 
         if button_reply_id in ("fb_up", "fb_down"):
             # A tap on a feedback button — never goes through the KB/LLM
-            # pipeline. Attach it to this phone's most recent real Q&A (the
-            # only one it could be rating, since buttons go out at most
-            # once/day) and ack silently, per the "quiet, just record it" call.
+            # pipeline. Buttons never expire on WhatsApp, so a tap can land
+            # long after other messages went back and forth — attribute it
+            # to the exact question the tapped button was sent with (via
+            # WhatsApp's own reply "context", the wamid of that button
+            # message), not "whatever's most recent right now," which
+            # mislabels a late tap once the conversation has moved on.
             rating = "up" if button_reply_id == "fb_up" else "down"
-            recent_questions = upload_manager.get_questions_for_session(phone)
-            last_question = recent_questions[-1]["question"] if recent_questions else ""
-            recent_history = get_user_data(phone).get("history", [])
-            last_answer = next(
-                (m["content"] for m in reversed(recent_history) if m.get("role") == "assistant"), ""
-            )
+            prompt = upload_manager.get_feedback_prompt(context_message_id)
+            if prompt:
+                last_question, last_answer = prompt["question"], prompt["answer"]
+            else:
+                # Fallback for a button sent before this attribution existed,
+                # or if the wamid lookup ever misses — best-effort guess,
+                # same as before.
+                recent_questions = upload_manager.get_questions_for_session(phone)
+                last_question = recent_questions[-1]["question"] if recent_questions else ""
+                recent_history = get_user_data(phone).get("history", [])
+                last_answer = next(
+                    (m["content"] for m in reversed(recent_history) if m.get("role") == "assistant"), ""
+                )
             upload_manager.log_feedback(phone, last_question, last_answer, rating)
             logger.info(f"⭐ [WEBHOOK] Feedback from {phone}: {rating}")
             return Response(content="", status_code=200)
@@ -1457,6 +1494,23 @@ async def whatsapp_webhook(request: Request):
             blended = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
             kb_context = retrieve_context(incoming_message, segment, extra_query=blended)
         user_data["history"].append({"role": "user", "content": user_turn})
+        # Authenticated employee-roster fact, not something the model can
+        # guess — lets it resolve "who is my BP" straight from the person's
+        # actual Function without asking "which function are you from?".
+        # None (not in roster / no Function column) must stay None here, so
+        # the model treats it as genuinely unknown rather than inventing one.
+        employee_function = EMPLOYEE_DIRECTORY.function_of(phone)
+        if employee_function:
+            kb_context = (
+                f"################  AUTHENTICATED EMPLOYEE PROFILE  ################\n"
+                f"This person's Function (from the employee roster, not something they typed) "
+                f"is: {employee_function}. Use this to resolve a \"who is my BP/HRBP\" or "
+                f"function-specific question WITHOUT asking them which function they're in — "
+                f"only ask if this Function value doesn't clearly map to anything in the "
+                f"KNOWLEDGE BASE's BP-by-vertical mapping.\n"
+                f"################  END OF EMPLOYEE PROFILE  ################\n\n"
+                + kb_context
+            )
         # Run off the event loop thread: generate_reply's DeepSeek/Claude-API
         # paths already block on network I/O, and claude_code_cli blocks on
         # a slow subprocess (~15-20s) — without to_thread, that one call
@@ -1492,7 +1546,10 @@ async def whatsapp_webhook(request: Request):
         touch_last_message(user_data)
         save_user_data(phone, user_data)
 
-        return whatsapp_reply(phone, reply, with_feedback_buttons=show_feedback_buttons)
+        return whatsapp_reply(
+            phone, reply, with_feedback_buttons=show_feedback_buttons,
+            feedback_question=incoming_message, feedback_answer=reply,
+        )
 
     except Exception as e:
         logger.error(f"ERROR in webhook: {e}")
