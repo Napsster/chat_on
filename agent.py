@@ -636,7 +636,13 @@ def build_system_prompt(kb_context: str, profile_block: str | None = None, segme
         f"################  TODAY'S DATE  ################\n"
         f"Today is {today} (India time). Use this when a question is date-relative — "
         f"e.g. \"next/upcoming holiday\" means the next entry in the Holiday Calendar "
-        f"whose date is on or after today, not the first row in the table.",
+        f"whose date is on or after today, not the first row in the table. This is a "
+        f"required calculation, not a guess: if the Holiday Calendar is present in the "
+        f"KNOWLEDGE BASE context, always work out and state the specific next holiday "
+        f"directly — never say you don't have this information or can't find it when the "
+        f"calendar is right there. Every employee asking this on the same day gets the "
+        f"same answer — this is today's date compared against a fixed published calendar, "
+        f"not something that depends on who's asking.",
     ]
     if segment in SEGMENT_FRAMING:
         parts.append(SEGMENT_FRAMING[segment])
@@ -690,6 +696,18 @@ def retrieve_context(message: str, segment: str | None = None, extra_query: str 
     queries = [message]
     if extra_query and extra_query != message:
         queries.append(extra_query)
+    # Calendar/event content (holidays, engagement calendar) is embedded as
+    # raw dated table rows — a vague query like "upcoming events" matches on
+    # generic semantic similarity and can lose to unrelated noise (other
+    # docs that just happen to mention "Recykal" or "events"), or land on a
+    # stale month instead of the current one. Blending in the current
+    # month/year nudges retrieval toward whichever chunk actually covers
+    # *this* month, without needing to keyword-detect "is this a calendar
+    # question" first — cheap (local embedding, no LLM call) and safe to
+    # always add.
+    dated_query = f"{message} {datetime.now(IST).strftime('%B %Y')}"
+    if dated_query not in queries:
+        queries.append(dated_query)
     for q in queries:
         for c in vstore.retrieve(q, k=TOP_K):
             if c not in seen:
