@@ -8,6 +8,8 @@ documents and managing uploads, backed by SQLite (see file_upload_handler.py).
 """
 
 import os
+import subprocess
+import tempfile
 import re
 import json
 import time
@@ -187,6 +189,103 @@ def _anthropic_client():
         import anthropic
         _ANTHROPIC_CLIENT = anthropic.Anthropic()
     return _ANTHROPIC_CLIENT
+
+
+# --- LLM_PROVIDER=claude_code_cli — an alternative to the raw Messages API
+# above, using the Claude Code CLI as the dedicated-seat runtime relay-core
+# uses (see AGENT_CREDENTIALS pattern there). Much slower per call (~6-16s
+# observed vs ~1-3s for the raw API) and, critically, inherits whatever
+# hooks/plugins/settings exist on this machine's ~/.claude/ unless isolated —
+# confirmed live: an unisolated call leaked this machine's caveman-mode
+# plugin straight into a real HR answer. Every invocation below runs with a
+# throwaway $HOME and cwd (no .claude/, no CLAUDE.md, no plugins to inherit)
+# and a scrubbed subprocess env — same reasoning as relay-core's own
+# scrubbedEnv, just applied to a chat reply instead of a coding-agent run.
+CLAUDE_CODE_OAUTH_TOKEN = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
+CLAUDE_CODE_BINARY = os.environ.get("CLAUDE_CODE_BINARY", "claude")
+_CLAUDE_CODE_ISOLATED_HOME = None
+_CLAUDE_CODE_ISOLATED_CWD = None
+
+
+def _claude_code_isolated_dirs() -> tuple[str, str]:
+    """Lazily create (once) a throwaway $HOME and working directory with
+    nothing in them — no .claude/settings.json, no CLAUDE.md — so this
+    process's personal Claude Code config can never bleed into a reply."""
+    global _CLAUDE_CODE_ISOLATED_HOME, _CLAUDE_CODE_ISOLATED_CWD
+    if _CLAUDE_CODE_ISOLATED_HOME is None:
+        _CLAUDE_CODE_ISOLATED_HOME = tempfile.mkdtemp(prefix="buddy-claude-code-home-")
+        _CLAUDE_CODE_ISOLATED_CWD = tempfile.mkdtemp(prefix="buddy-claude-code-cwd-")
+    return _CLAUDE_CODE_ISOLATED_HOME, _CLAUDE_CODE_ISOLATED_CWD
+
+
+def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+    """Same contract as the other _generate_reply_* functions, via the
+    Claude Code CLI (`claude -p ...`) instead of an SDK/HTTP call. See the
+    module comment above for why this path needs the isolated home/cwd."""
+    system_prompt = build_system_prompt(kb_context, profile_block, segment)
+    # The CLI is a single-shot prompt-in/text-out tool, not a structured
+    # messages array — fold recent turns into the prompt text itself.
+    history = user_data["history"][-MAX_HISTORY:]
+    convo = "\n".join(f"{m['role'].upper()}: {m['content']}" for m in history)
+    question = history[-1]["content"] if history and history[-1]["role"] == "user" else ""
+    prompt = f"{convo}\n\nRespond to the ASSISTANT's next turn now." if len(history) > 1 else question
+
+    isolated_home, isolated_cwd = _claude_code_isolated_dirs()
+    # If CLAUDE_CODE_BINARY is an absolute path (e.g. a user-space Node
+    # install with no system-wide PATH entry, like buddy-vm's), make sure
+    # its directory — and therefore the `node` next to it, which the
+    # binary's own shebang needs — is actually on the subprocess's PATH.
+    # The parent process's own PATH (systemd's, here) won't have it.
+    path = os.environ.get("PATH", "")
+    if os.path.isabs(CLAUDE_CODE_BINARY):
+        bin_dir = os.path.dirname(CLAUDE_CODE_BINARY)
+        if bin_dir not in path.split(os.pathsep):
+            path = f"{bin_dir}{os.pathsep}{path}"
+    env = {
+        "HOME": isolated_home,
+        "PATH": path,
+        "CLAUDE_CODE_OAUTH_TOKEN": CLAUDE_CODE_OAUTH_TOKEN,
+    }
+    try:
+        proc = subprocess.run(
+            [
+                CLAUDE_CODE_BINARY, "-p", prompt,
+                "--output-format", "stream-json",
+                "--verbose",
+                "--allowed-tools", "",
+                "--strict-mcp-config",
+                "--append-system-prompt", system_prompt,
+            ],
+            cwd=isolated_cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        text = ""
+        for line in proc.stdout.splitlines():
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if obj.get("type") == "result":
+                if obj.get("is_error"):
+                    raise RuntimeError(f"claude CLI reported an error: {obj.get('result')!r}")
+                text = (obj.get("result") or "").strip()
+        if not text:
+            raise RuntimeError(f"claude CLI produced no result (exit {proc.returncode}): {proc.stderr[:500]}")
+        unanswered = text.startswith(UNANSWERED_MARKER)
+        if unanswered:
+            text = text[len(UNANSWERED_MARKER):].lstrip()
+        return text, unanswered
+    except Exception:
+        # Deliberately re-raised, not swallowed into an apology here — the
+        # dispatcher (generate_reply) catches this and falls back to
+        # DeepSeek, so a CLI hiccup (timeout, bad token, crash) still gets
+        # the user a real grounded answer instead of "something glitched."
+        raise
+
 
 MAX_HISTORY = 20  # keep last N turns
 
@@ -964,10 +1063,23 @@ def _welcome_template_configured() -> bool:
 
 
 def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
-    """Dispatches to whichever LLM_PROVIDER is configured. Both branches
-    share the exact same contract: (reply_text, unanswered)."""
+    """Dispatches to whichever LLM_PROVIDER is configured. All branches
+    share the exact same contract: (reply_text, unanswered).
+
+    claude_code_cli is the newest, least proven path (external binary,
+    subprocess, dedicated-seat token) — a failure there (timeout, bad
+    token, crash) falls back to DeepSeek automatically rather than showing
+    the user an apology, as long as DEEPSEEK_API_KEY is still configured.
+    Falling back changes which model answered, never whether the answer is
+    still grounded — both paths share the same system prompt/KB context."""
     if LLM_PROVIDER == "claude":
         return _generate_reply_claude(user_data, kb_context, profile_block, segment)
+    if LLM_PROVIDER == "claude_code_cli":
+        try:
+            return _generate_reply_claude_code_cli(user_data, kb_context, profile_block, segment)
+        except Exception as e:
+            logger.warning(f"claude_code_cli failed ({e}) — falling back to DeepSeek for this reply")
+            return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
     return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
 
 
