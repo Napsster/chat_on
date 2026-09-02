@@ -1334,6 +1334,31 @@ def save_media_meta(phone: str, media: list[dict]) -> list[dict]:
     return saved
 
 
+def send_meta_typing_indicator(incoming_message_id: str | None) -> None:
+    """Mark the incoming message as read and show the "typing…" indicator on
+    WhatsApp while we're busy doing retrieval + the LLM call — Meta shows it
+    for up to ~25s or until we actually send the reply, whichever comes
+    first. Best-effort only: no incoming_message_id (e.g. Twilio path), no
+    Meta config, or a failed request should never block or fail the real
+    reply — swallow any error here."""
+    if not incoming_message_id or not META_ACCESS_TOKEN or not META_PHONE_NUMBER_ID:
+        return
+    try:
+        requests.post(
+            f"{META_GRAPH_BASE}/{META_PHONE_NUMBER_ID}/messages",
+            headers=_meta_headers(),
+            json={
+                "messaging_product": "whatsapp",
+                "status": "read",
+                "message_id": incoming_message_id,
+                "typing_indicator": {"type": "text"},
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        logger.debug(f"Typing indicator failed (non-fatal): {e}")
+
+
 def send_meta_text(to_phone: str, body: str) -> tuple[bool, str]:
     """Send a plain message via the Graph API — only deliverable within 24h
     of the recipient's last message; Meta will reject it otherwise."""
@@ -1715,6 +1740,9 @@ async def whatsapp_webhook(request: Request):
                 logger.info(f"⏳ [WEBHOOK] Same message from {phone} still being answered — skipping resend")
                 return Response(content="", status_code=200)
             _IN_FLIGHT_MESSAGES.add(in_flight_key)
+
+        if WHATSAPP_PROVIDER == "meta":
+            send_meta_typing_indicator(message_id)
 
         sync_knowledge_from_drive()
 
