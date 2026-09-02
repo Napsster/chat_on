@@ -222,7 +222,7 @@ def _claude_code_isolated_dirs() -> tuple[str, str]:
     return home, cwd
 
 
-def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
     """Same contract as the other _generate_reply_* functions, via the
     Claude Code CLI (`claude -p ...`) instead of an SDK/HTTP call. See the
     module comment above for why this path needs the isolated home/cwd."""
@@ -279,10 +279,7 @@ def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_bl
                 text = (obj.get("result") or "").strip()
         if not text:
             raise RuntimeError(f"claude CLI produced no result (exit {proc.returncode}): {proc.stderr[:500]}")
-        unanswered = text.startswith(UNANSWERED_MARKER)
-        if unanswered:
-            text = text[len(UNANSWERED_MARKER):].lstrip()
-        return text, unanswered
+        return _strip_reply_markers(text)
     except Exception:
         # Deliberately re-raised, not swallowed into an apology here — the
         # dispatcher (generate_reply) catches this and falls back to
@@ -308,6 +305,33 @@ DEFLECTION = (
 # salary/CTC) — stripped before the user ever sees it, used to log the
 # question for the unanswered-questions report.
 UNANSWERED_MARKER = "[UNANSWERED]"
+
+# Internal-only tag the model prepends when the reply itself isn't a real
+# informational answer to rate — a clarifying follow-up after negative
+# feedback, small talk, an apology, etc. Stripped before the user ever sees
+# it, used to skip attaching feedback buttons to that turn (nothing there
+# for the person to actually rate).
+META_REPLY_MARKER = "[META]"
+
+
+def _strip_reply_markers(text: str) -> tuple[str, bool, bool]:
+    """Strip UNANSWERED_MARKER and/or META_REPLY_MARKER off the front of a
+    raw model reply, in either order, returning (clean_text, unanswered,
+    is_meta). Both tags are internal-only signals, never shown to the user."""
+    unanswered = False
+    is_meta = False
+    changed = True
+    while changed:
+        changed = False
+        if text.startswith(UNANSWERED_MARKER):
+            text = text[len(UNANSWERED_MARKER):].lstrip()
+            unanswered = True
+            changed = True
+        if text.startswith(META_REPLY_MARKER):
+            text = text[len(META_REPLY_MARKER):].lstrip()
+            is_meta = True
+            changed = True
+    return text, unanswered, is_meta
 
 # Shown once, appended to a brand-new user's first reply only.
 FIRST_MESSAGE_DISCLAIMER = (
@@ -366,6 +390,13 @@ peopleandculture@recykal.com." If their Function isn't known or doesn't map to a
 just the generic P&C email as usual.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
 deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
+- If your reply is NOT itself a real informational answer — e.g. a clarifying follow-up after \
+someone reacted negatively ("what were you looking for?"), small talk, an apology, or anything else \
+where there's no actual information in the reply for the person to rate — begin it with the exact \
+text {META_REPLY_MARKER} as the very first characters (before {UNANSWERED_MARKER} if both apply). \
+This tag is invisible to the user and stripped automatically — never mention it, explain it, or \
+apologize for it. It's used only to skip showing a feedback prompt on a turn that isn't answering \
+anything.
 - A PRIOR reply of yours earlier in this same conversation is NOT proof that something is missing. \
 The KNOWLEDGE BASE below is refreshed fresh for every single message — if you (or this \
 conversation's history) said "I don't have that" before, but the KNOWLEDGE BASE CONTEXT you have \
@@ -590,6 +621,11 @@ the number carefully — e.g. 600 km falls in the "250 Kms - 1000 Kms" slab, NOT
 Kms". Double-check which slab a given distance actually falls into before answering.
 - ZingHR login issues: always direct the person to email peopleandculture@recykal.com or reach out \
 to their BP (Business Partner) — do not attempt to troubleshoot the login yourself.
+- Never share a phone number for People & Culture / HR contact, even if one appears in the \
+KNOWLEDGE BASE (e.g. on a "reach out to us" slide). If someone asks for "the HR number," "P&C's \
+phone number," or similar, give only the email peopleandculture@recykal.com — no phone number. \
+(This does not apply to the Security Helpline for facility/security emergencies, which is a \
+separate, intentionally-shared number.)
 - Adding a spouse or newborn child to Onsurity/insurance after getting married or having a child: \
 tell them to email peopleandculture@recykal.com within 30 days of the marriage or birth to request \
 the change.
@@ -987,6 +1023,21 @@ _PLAIN_GREETINGS = {"hi", "hii", "hiii", "hello", "helo", "hey", "heyy", "heyo",
 def _is_plain_greeting(text: str) -> bool:
     normalized = re.sub(r"[^a-z]", "", text.lower())
     return normalized in _PLAIN_GREETINGS
+
+
+# Short acknowledgments/filler — not a real question, nothing to rate. Used
+# to gate feedback buttons: shown on every genuine query, not on "ok"/"thanks"
+# closing out a conversation.
+_FILLER_ACKS = {
+    "ok", "okay", "okey", "k", "kk", "cool", "nice", "great", "awesome",
+    "thanks", "thankyou", "thanku", "thx", "ty", "gotit", "got", "noted",
+    "alright", "fine", "sure", "yep", "yes", "no", "nope", "bye", "byee",
+}
+
+
+def _is_filler_ack(text: str) -> bool:
+    normalized = re.sub(r"[^a-z]", "", text.lower())
+    return normalized in _FILLER_ACKS
 
 
 def resolve_segment(candidate: dict | None, user_data: dict, incoming_message: str, phone: str | None = None) -> tuple[str | None, bool]:
@@ -1401,9 +1452,10 @@ def _welcome_template_configured() -> bool:
     return bool(TWILIO_WELCOME_TEMPLATE_SID)
 
 
-def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
     """Dispatches to whichever LLM_PROVIDER is configured. All branches
-    share the exact same contract: (reply_text, unanswered).
+    share the exact same contract: (reply_text, unanswered, is_meta) — see
+    META_REPLY_MARKER for what is_meta means.
 
     claude_code_cli is the newest, least proven path (external binary,
     subprocess, dedicated-seat token) — a failure there (timeout, bad
@@ -1422,7 +1474,7 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
     return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
 
 
-def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
     """Same contract as _generate_reply_deepseek, via the Claude API instead."""
     system_prompt = build_system_prompt(kb_context, profile_block, segment)
     messages = user_data["history"][-MAX_HISTORY:]
@@ -1448,19 +1500,16 @@ def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str 
             sentences = re.split(r"(?<=[.!?])\s+", text)
             if len(sentences) > 1:
                 text = " ".join(sentences[:-1]).strip()
-        unanswered = text.startswith(UNANSWERED_MARKER)
-        if unanswered:
-            text = text[len(UNANSWERED_MARKER):].lstrip()
-        return text, unanswered
+        return _strip_reply_markers(text)
     except Exception as e:
         logger.error(f"LLM error (claude): {e}")
         return (
             "Sorry, I glitched for a second there — could you send that again? "
             "I'm happy to help with anything about working at Recykal, any time. 😊"
-        ), False
+        ), False, True
 
 
-def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool]:
+def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
     """Call DeepSeek with retrieved KB context + candidate profile + recent
     history. Returns (reply_text, unanswered) — unanswered is True only when
     the model tagged this as a genuine knowledge-base gap (see UNANSWERED_MARKER)."""
@@ -1498,16 +1547,13 @@ def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: st
             sentences = re.split(r"(?<=[.!?])\s+", text)
             if len(sentences) > 1:
                 text = " ".join(sentences[:-1]).strip()
-        unanswered = text.startswith(UNANSWERED_MARKER)
-        if unanswered:
-            text = text[len(UNANSWERED_MARKER):].lstrip()
-        return text, unanswered
+        return _strip_reply_markers(text)
     except Exception as e:
         logger.error(f"LLM error: {e}")
         return (
             "Sorry, I glitched for a second there — could you send that again? "
             "I'm happy to help with anything about working at Recykal, any time. 😊"
-        ), False
+        ), False, True
 
 
 def whatsapp_reply(
@@ -1653,7 +1699,7 @@ async def whatsapp_webhook(request: Request):
                 last_answer = next(
                     (m["content"] for m in reversed(recent_history) if m.get("role") == "assistant"), ""
                 )
-            upload_manager.log_feedback(phone, last_question, last_answer, rating)
+            upload_manager.log_feedback(phone, last_question, last_answer, rating, wamid=context_message_id)
             logger.info(f"⭐ [WEBHOOK] Feedback from {phone}: {rating}")
             return Response(content="", status_code=200)
 
@@ -1771,7 +1817,7 @@ async def whatsapp_webhook(request: Request):
         # a slow subprocess (~15-20s) — without to_thread, that one call
         # would stall the entire server, queuing every other incoming
         # WhatsApp message behind it instead of answering them concurrently.
-        reply, unanswered = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block, segment)
+        reply, unanswered, is_meta = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block, segment)
         if not media:
             # Document-upload turns are synthetic, not a real question — skip logging those.
             upload_manager.log_question(phone, "whatsapp", incoming_message, unanswered, segment)
@@ -1780,22 +1826,23 @@ async def whatsapp_webhook(request: Request):
         if show_disclaimer:
             reply += FIRST_MESSAGE_DISCLAIMER
 
-        # At most one feedback-button prompt per phone per (server-local)
-        # calendar day, attached to that day's first real answer — every
-        # other reply that day stays plain text. Meta-only (see whatsapp_reply).
-        today_str = datetime.now().date().isoformat()
+        # Feedback buttons go out on every genuine query, not once/day — a
+        # once/day cap meant most real questions in a busy conversation
+        # never got a chance to be rated at all. Gated on the MESSAGE, not
+        # the calendar: skip only for things that aren't actually a
+        # question to rate — a bare greeting reaching this normal-answer
+        # path (only a brand-new/empty history gets the fixed-greeting
+        # shortcut above), a short filler acknowledgment ("ok", "thanks",
+        # "bye") closing out the conversation, or a reply that isn't itself
+        # a real answer (a clarifying follow-up after negative feedback,
+        # small talk, an apology — see META_REPLY_MARKER). Meta-only (see
+        # whatsapp_reply).
         show_feedback_buttons = (
             WHATSAPP_PROVIDER == "meta"
-            and user_data.get("last_feedback_prompted_date") != today_str
-            # A bare "hi" from a returning conversation still reaches this
-            # normal-answer path (only a brand-new/empty history gets the
-            # fixed-greeting shortcut above) — nothing substantive there to
-            # rate, and consuming today's one feedback slot on it would mean
-            # their actual first real question doesn't get buttons at all.
             and not _is_plain_greeting(incoming_message)
+            and not _is_filler_ack(incoming_message)
+            and not is_meta
         )
-        if show_feedback_buttons:
-            user_data["last_feedback_prompted_date"] = today_str
 
         user_data["history"].append({"role": "assistant", "content": reply})
         touch_last_message(user_data)
@@ -1861,7 +1908,7 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         kb_context = retrieve_context(message, segment, extra_query=blended)
 
         user_data["history"].append({"role": "user", "content": message})
-        reply, unanswered = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block=None, segment=segment)
+        reply, unanswered, _is_meta = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block=None, segment=segment)
         upload_manager.log_question(session_key, "web", message, unanswered, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
@@ -2472,6 +2519,51 @@ def _normalize_for_clustering(text: str) -> str:
     return normalized
 
 
+_TOPIC_CLUSTER_CACHE = {"computed_at": 0.0, "count": None}
+_TOPIC_CLUSTER_TTL = 600  # seconds — embedding-clustering every WhatsApp
+# question is too slow to redo on every summary-bar page load, so cache it
+# briefly instead; a few minutes of staleness on a "how many distinct
+# topics" count is a fine tradeoff.
+
+
+def _distinct_whatsapp_topic_count() -> int:
+    """Cached count of semantically-distinct WhatsApp questions, via the
+    same embedding clustering the export's Sheet 2 already uses. Recomputed
+    at most once per _TOPIC_CLUSTER_TTL."""
+    now = time.time()
+    if _TOPIC_CLUSTER_CACHE["count"] is not None and (now - _TOPIC_CLUSTER_CACHE["computed_at"]) < _TOPIC_CLUSTER_TTL:
+        return _TOPIC_CLUSTER_CACHE["count"]
+    try:
+        from vector_store import cluster_similar_texts
+        questions = upload_manager.get_all_whatsapp_questions()
+        if questions:
+            normalized = [_normalize_for_clustering(q) for q in questions]
+            count = len(cluster_similar_texts(normalized, threshold=0.80))
+        else:
+            count = 0
+    except Exception as e:
+        logger.error(f"Error computing distinct WhatsApp topic count: {e}")
+        count = _TOPIC_CLUSTER_CACHE["count"] or 0
+    _TOPIC_CLUSTER_CACHE["count"] = count
+    _TOPIC_CLUSTER_CACHE["computed_at"] = now
+    return count
+
+
+@app.get("/whatsapp/summary")
+async def whatsapp_summary(current_user: dict = Depends(require_admin)):
+    """Admin-only: aggregate stats for the WhatsApp tab's summary bar —
+    people, questions, distinct topics, feedback tally. See
+    get_whatsapp_summary_stats/_distinct_whatsapp_topic_count for what's
+    cheap-and-live vs cached."""
+    try:
+        stats = upload_manager.get_whatsapp_summary_stats()
+        stats["distinct_topics"] = _distinct_whatsapp_topic_count()
+        return JSONResponse({"success": True, "summary": stats})
+    except Exception as e:
+        logger.error(f"WhatsApp summary error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/whatsapp/export")
 async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
     """Admin-only: Excel export of every WhatsApp conversation. Sheet 1 is
@@ -2525,12 +2617,34 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
                         answer = a
                         break
 
+                # A person can tap both feedback buttons in quick succession
+                # before WhatsApp locks the message (real case seen in
+                # production: down then up, 2 seconds apart) — that logs two
+                # feedback rows for the same answer, not two separate turns.
+                # Treat any further unused matches within 60s of the first
+                # one as re-taps of this same answer (not a later, genuinely
+                # separate repeat question) and use whichever was rated last.
                 feedback = ""
-                for i, fb in enumerate(feedback_entries):
-                    if not feedback_used[i] and answer and fb["answer"] == answer:
+                first_i = next(
+                    (i for i, fb in enumerate(feedback_entries) if not feedback_used[i] and answer and fb["answer"] == answer),
+                    None,
+                )
+                if first_i is not None:
+                    feedback_used[first_i] = True
+                    latest = feedback_entries[first_i]
+                    first_time = datetime.fromisoformat(latest["rated_at"]) if latest["rated_at"] else None
+                    for i in range(first_i + 1, len(feedback_entries)):
+                        fb = feedback_entries[i]
+                        if feedback_used[i] or fb["answer"] != answer:
+                            continue
+                        t = datetime.fromisoformat(fb["rated_at"]) if fb["rated_at"] else None
+                        if first_time is None or t is None or abs((t - first_time).total_seconds()) > 60:
+                            break
                         feedback_used[i] = True
-                        feedback = "👍" if fb["rating"] == "up" else "👎"
-                        break
+                        latest_time = datetime.fromisoformat(latest["rated_at"])
+                        if t >= latest_time:
+                            latest = fb
+                    feedback = "👍" if latest["rating"] == "up" else "👎"
 
                 all_rows.append({
                     "name": name,
