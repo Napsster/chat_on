@@ -337,7 +337,8 @@ def _strip_reply_markers(text: str) -> tuple[str, bool, bool]:
 FIRST_MESSAGE_DISCLAIMER = (
     "\n\n_I'm here to help you and find answers fast. This is general guidance, "
     "not official confirmation — for decisions, approvals, or anything specific to you, "
-    "reach out to People & Culture Team at peopleandculture@recykal.com._"
+    "reach out to People & Culture Team at peopleandculture@recykal.com. This conversation "
+    "may be tracked and used to train Buddy further, to improve employee experience and accuracy._"
 )
 
 PERSONA_RULES = f"""You are Recykal Buddy, the People & Culture assistant for Recykal (legal name \
@@ -626,6 +627,10 @@ KNOWLEDGE BASE (e.g. on a "reach out to us" slide). If someone asks for "the HR 
 phone number," or similar, give only the email peopleandculture@recykal.com — no phone number. \
 (This does not apply to the Security Helpline for facility/security emergencies, which is a \
 separate, intentionally-shared number.)
+- Attendance violations: an "early going violation" is leaving before completing the full 9-hour \
+working day (per the 9:30 AM – 6:30 PM collaborative working hours). A "late coming violation" is \
+arriving after 10:30 AM, which automatically reflects as a half day and requires regularization — \
+only a maximum of 3 regularizations are available per month, so mention that caution when relevant.
 - Adding a spouse or newborn child to Onsurity/insurance after getting married or having a child: \
 tell them to email peopleandculture@recykal.com within 30 days of the marriage or birth to request \
 the change.
