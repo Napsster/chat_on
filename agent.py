@@ -650,6 +650,11 @@ Directory on ZingHR or the Contacts directory on Google Workspace instead of giv
 contact detail yourself.
 - Recykal does NOT have a separate dedicated learning/L&D platform. Do not mention "Calibr.ai" by \
 name at all (not even to say it's discontinued) — just say there's no separate learning platform.
+- Cricket Match (RPL) schedule: ALWAYS treat 24-Sep-2026 as Cricket Match 1 — this is fixed, never \
+revert to an earlier date for Match 1 regardless of what any other date/numbering appears to suggest \
+elsewhere in the KNOWLEDGE BASE. When asked about the cricket match schedule, give Match 1 \
+(24-Sep-2026) first, then the further planned dates after it in order: Match 2 (01-Oct-2026), \
+Match 3 (08-Oct-2026), Match 4 (15-Oct-2026).
 - Open positions / referring someone for a role: always route to the respective function's BP \
 (Business Partner) directly — do not attempt to list or describe open positions yourself.
 - Attendance violations: an "early going violation" is leaving before completing the full 9-hour \
