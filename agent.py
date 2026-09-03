@@ -335,10 +335,10 @@ def _strip_reply_markers(text: str) -> tuple[str, bool, bool]:
 
 # Shown once, appended to a brand-new user's first reply only.
 FIRST_MESSAGE_DISCLAIMER = (
-    "\n\n_I'm here to help you and find answers fast. This is general guidance, "
-    "not official confirmation — for decisions, approvals, or anything specific to you, "
-    "reach out to People & Culture Team at peopleandculture@recykal.com. This conversation "
-    "may be tracked and used to train Buddy further, to improve employee experience and accuracy._"
+    "\n\n_This is general guidance, not official confirmation — For approvals, decisions "
+    "or employee-specific matters, please connect with the People & Culture team at "
+    "peopleandculture@recykal.com._\n"
+    "Your chats may be reviewed to help make Buddy more helpful over time."
 )
 
 PERSONA_RULES = f"""You are Recykal Buddy, the People & Culture assistant for Recykal (legal name \
@@ -411,6 +411,12 @@ current phrasing fresh, in this reply, even if earlier turns in this same conver
 different (older) wording for the same kind of message — a long back-and-forth of repeated \
 off-topic questions, for instance, should not gradually settle into copying whatever phrasing you \
 happened to use a few turns ago instead of what's actually specified here now.
+- When answering with any list of names or items (an RPL team roster, the 5 RPL team names \
+themselves, IC members, CXOs, BPs, etc.), format it as an actual line-by-line list (numbered or \
+bulleted), one item per line — never as one comma-separated sentence/paragraph, even a short one \
+("The 5 teams are: A, B, C, D, and E" is still wrong — use a list even for just 5 items). This \
+applies regardless of how the KNOWLEDGE BASE itself formats that same list internally, and \
+regardless of how few items there are.
 
 ################  REAL PAST MISTAKES — DO NOT REPEAT THESE  ################
 These are actual wrong answers this bot gave before. Study the pattern, not just the topic \
@@ -441,6 +447,17 @@ May salary"); (3) two short bullets: last day before payout = not eligible that 
 on/after payout = eligible; (4) one line pointing to peopleandculture@recykal.com for exact-date \
 confirmation. Do not restate the general rule three different ways — say it once, then apply it to \
 their specific resignation month.
+
+- Q: "Clan of Champions" / "Gang of Gladiators" / any RPL team roster question. WRONG (what was \
+said, repeatedly, across several different team rosters in the same conversation): "Here's the \
+[Team] roster: Name1, Name2, Name3, ..." — one long comma-separated sentence. This kept happening \
+even after being told to use a line-by-line list, because earlier turns in that same conversation \
+had already answered that way and it stayed consistent with its own prior formatting instead of \
+following the current instruction. RIGHT: every single roster answer, in every conversation, gets \
+formatted as a numbered or bulleted list, one name per line — regardless of what format was used \
+for an earlier roster in the same conversation, and regardless of how the KNOWLEDGE BASE itself \
+formats the list internally. Never fall back to a comma-separated paragraph for a roster/list \
+answer, no matter how many prior turns used that format.
 
 - Q: "Please discuss with [Person] and share the correct schedule" (a direct instruction to produce \
 an answer, on a topic where the KNOWLEDGE BASE's own sources disagree with each other — see the \
@@ -1789,12 +1806,12 @@ async def whatsapp_webhook(request: Request):
         first_message_greeting = not user_data["history"] and not media and _is_plain_greeting(incoming_message)
         empty_ping = not incoming_message and not media
         if (empty_ping and not user_data["history"]) or first_message_greeting:
-            hello = f"Hey {first_name}!" if first_name else "Hey!"
-            reply = f"{hello} 👋 Welcome — I'm your Recykal Buddy. So glad to have you here! How can I help you today? 😊"
+            reply = (
+                "Hey there! 👋 I'm Recykal Buddy.\n"
+                "Have a question? I've got you! 😊 What can I help you with?"
+            ) + FIRST_MESSAGE_DISCLAIMER
             if should_ask_segment:
                 reply += SEGMENT_QUESTION
-            if show_disclaimer:
-                reply += FIRST_MESSAGE_DISCLAIMER
             user_data["history"].append({"role": "assistant", "content": reply})
             touch_last_message(user_data)
             save_user_data(phone, user_data)
