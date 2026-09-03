@@ -1550,7 +1550,17 @@ def send_whatsapp_template(to_phone: str, content_variables: dict | None = None)
     return send_whatsapp_template_twilio(to_phone, content_variables)
 
 
+def _to_whatsapp_bold(text: str) -> str:
+    """WhatsApp only understands single-asterisk *bold* — it has no concept
+    of GitHub-style **bold**, so double asterisks render as literal stray
+    characters around the bolded word. The KNOWLEDGE BASE and the LLM both
+    write standard **bold** markdown, so convert it here, once, right before
+    the message actually goes out over WhatsApp."""
+    return re.sub(r"\*\*(.+?)\*\*", r"*\1*", text)
+
+
 def send_whatsapp_freeform(to_phone: str, body: str) -> tuple[bool, str]:
+    body = _to_whatsapp_bold(body)
     if WHATSAPP_PROVIDER == "meta":
         return send_meta_text(to_phone, body)
     return send_whatsapp_freeform_twilio(to_phone, body)
@@ -1670,6 +1680,7 @@ def whatsapp_reply(
     phone: str, text: str, with_feedback_buttons: bool = False,
     feedback_question: str | None = None, feedback_answer: str | None = None,
 ) -> Response:
+    text = _to_whatsapp_bold(text)
     """Deliver a reply and return the HTTP response the webhook itself
     should send. Twilio expects the reply inline as TwiML; Meta's Cloud API
     has no such mechanism — the webhook response must just be a bare 200,
