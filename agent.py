@@ -331,6 +331,18 @@ def _strip_reply_markers(text: str) -> tuple[str, bool, bool]:
             text = text[len(META_REPLY_MARKER):].lstrip()
             is_meta = True
             changed = True
+    # Safety net: the model is instructed to only ever place these tags as
+    # the very first characters, but production has shown it can slip and
+    # drop one mid-reply (e.g. a reply that answers part of a question and
+    # tags only the unanswered part). Strip it wherever it appears rather
+    # than ever leaking the raw tag to the user; still counts toward the
+    # same flags.
+    if UNANSWERED_MARKER in text:
+        text = re.sub(r"[ 	]*" + re.escape(UNANSWERED_MARKER) + r"[ 	]*", " ", text).strip()
+        unanswered = True
+    if META_REPLY_MARKER in text:
+        text = re.sub(r"[ 	]*" + re.escape(META_REPLY_MARKER) + r"[ 	]*", " ", text).strip()
+        is_meta = True
     return text, unanswered, is_meta
 
 # Shown once, appended to a brand-new user's first reply only.
@@ -393,6 +405,12 @@ BP-by-vertical mapping, name that BP directly as an option too — e.g. "I don't
 detail — best to check with your BP, [Name], or the People & Culture team at \
 peopleandculture@recykal.com." If their Function isn't known or doesn't map to a BP, fall back to \
 just the generic P&C email as usual.
+- If your reply answers PART of the question but genuinely doesn't have another part (e.g. "which \
+teams are playing" is answerable but "who's on today's exact lineup" isn't), do NOT use the \
+{UNANSWERED_MARKER} tag at all — it is only for a reply that is ENTIRELY a non-answer. Just write \
+the real answer first, then a short plain sentence for the unavailable part, with no tag anywhere. \
+The tag must never appear anywhere except as the literal first characters of the whole reply — never \
+mid-reply, never before just one sentence inside a longer answer.
 - If you are unsure whether something is in the KNOWLEDGE BASE, treat it as not there and \
 deflect (with the {UNANSWERED_MARKER} tag as above). Accuracy matters more than being helpful.
 - If your reply is NOT itself a real informational answer — e.g. a clarifying follow-up after \
@@ -995,6 +1013,18 @@ def retrieve_context(message: str, segment: str | None = None, extra_query: str 
         if month_section not in seen:
             seen.add(month_section)
             merged.append(month_section)
+    # The RPL team roster (owners/captains/players) is small but split into
+    # one embedding chunk per team — a broad cross-team question ("who
+    # leads each team", "list every captain") carries no team name to
+    # match on, so semantic search reliably surfaces only some of the 5
+    # team chunks within TOP_K, not all — the exact same shape of gap the
+    # calendar fix above addresses. The whole doc is small (~4k chars), so
+    # unlike the calendar, just pull the entire thing in on any RPL keyword
+    # match instead of doing partial section extraction.
+    rpl_section = _rpl_roster_keyword_section(" ".join(queries), base)
+    if rpl_section and rpl_section not in seen:
+        seen.add(rpl_section)
+        merged.append(rpl_section)
     return "\n\n---\n\n".join(merged) if merged else base
 
 
@@ -1075,6 +1105,37 @@ def _keyword_calendar_sections(message: str, base_text: str) -> list[str]:
         end = len(heading) + end_match.start() if end_match else len(rest)
         sections.append(f"[Source: engagement calendar, matched by keyword]\n{rest[:end].strip()}")
     return sections
+
+
+_RPL_KEYWORDS = (
+    "rpl", "volleyball", "cricket", "badminton", "tournament", "captain", "captains",
+    "gladiators", "titans", "champions", "fighters", "samurais", "premier league",
+)
+
+
+def _rpl_roster_keyword_section(message: str, base_text: str) -> str | None:
+    """Pull the entire RPL roster doc (owners/captains/players) in full
+    whenever the message looks RPL-related, bypassing embedding search —
+    see the comment at the call site in retrieve_context for why a broad
+    cross-team question can't reliably surface every team's chunk via
+    semantic similarity alone. Returns None if the doc isn't in this
+    segment's knowledge (e.g. pre_join) or the message isn't RPL-related."""
+    lower_msg = message.lower()
+    if not any(kw in lower_msg for kw in _RPL_KEYWORDS):
+        return None
+    heading = "## File: 44-rpl-teams-players.md"
+    idx = base_text.find(heading)
+    if idx == -1:
+        return None
+    rest = base_text[idx:]
+    # Find the true next-document boundary ("## File: <next title>"), not
+    # just any "---" — this doc uses "---" internally to separate its own
+    # roster/leaderboard/results sections, so matching on the first "---"
+    # truncated away everything after the team rosters (leaderboard,
+    # badminton results, schedule) in production.
+    end_match = re.search(r"\n## File: ", rest[len(heading):])
+    end = len(heading) + end_match.start() if end_match else len(rest)
+    return f"[Source: RPL roster, matched by keyword]\n{rest[:end].strip()}"
 
 
 # --- Segment (pre_join / post_join) resolution ------------------------------
