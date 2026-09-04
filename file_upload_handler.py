@@ -85,6 +85,47 @@ class UserSession(Base):
     segment = Column(String(20), nullable=True)
     segment_asked = Column(Boolean, default=False, nullable=False)
     last_message_at = Column(String(50), nullable=True)  # ISO string, matches datetime.fromisoformat() usage in agent.py
+    last_feedback_prompted_date = Column(String(10), nullable=True)  # 'YYYY-MM-DD' — at most one 👍/👎 prompt per day
+    last_event_nudge_date = Column(String(10), nullable=True)  # 'YYYY-MM-DD' (IST) — caps the today/tomorrow event nudge to once/day/person
+
+class FeedbackLog(Base):
+    """One row per feedback-button MESSAGE that's been rated at least once
+    (not one row per tap) — sparse by design, buttons only go out once/day
+    per phone. wamid ties this back to the exact button message (see
+    FeedbackPrompt); a second tap on the same message updates this row's
+    rating/rated_at in place instead of inserting a duplicate — WhatsApp
+    briefly allows both buttons to be tapped before it locks the message,
+    and without this a rapid down-then-up produced two rows that then had
+    to be reconciled downstream (chat viewer, export) instead of never
+    existing in the first place. wamid is nullable for rows logged before
+    this column existed, which can't be de-duplicated this way."""
+    __tablename__ = "feedback_log"
+
+    id = Column(Integer, primary_key=True)
+    rated_at = Column(DateTime, default=datetime.utcnow)
+    session_key = Column(String(100), nullable=False)
+    question = Column(Text)
+    answer = Column(Text)
+    rating = Column(String(10), nullable=False)  # 'up' or 'down'
+    wamid = Column(String(100), nullable=True, unique=True, index=True)
+
+class FeedbackPrompt(Base):
+    """One row per feedback-button message actually sent — keyed by its
+    WhatsApp message id (wamid). WhatsApp buttons never expire, and a tap
+    arrives as a reply "context" pointing at this exact wamid — so when the
+    tap comes back (possibly days later, after the person has sent more
+    messages), we look up the wamid here instead of guessing "whatever's
+    most recent right now," which silently mislabels a late tap against
+    the wrong question. Rows are small and low-volume (same once/day cap
+    as the buttons themselves) — no cleanup needed."""
+    __tablename__ = "feedback_prompts"
+
+    id = Column(Integer, primary_key=True)
+    wamid = Column(String(100), nullable=False, unique=True, index=True)
+    session_key = Column(String(100), nullable=False)
+    question = Column(Text)
+    answer = Column(Text)
+    sent_at = Column(DateTime, default=datetime.utcnow)
 
 class ChatMessage(Base):
     """One row per chat turn — replaces the JSON 'history' list. Ordered by
@@ -175,6 +216,28 @@ class FileUploadManager:
                 if renamed_admin or renamed_user:
                     conn.commit()
                     logger.info(f"Migrated users: renamed {renamed_admin} 'staff'->'admin', {renamed_user} 'pilot'->'user' role value(s)")
+
+            us_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(user_sessions)"))]
+            if us_cols and 'last_feedback_prompted_date' not in us_cols:
+                conn.execute(text(
+                    "ALTER TABLE user_sessions ADD COLUMN last_feedback_prompted_date VARCHAR(10)"
+                ))
+                conn.commit()
+                logger.info("Migrated user_sessions: added last_feedback_prompted_date column")
+
+            fl_cols = [row[1] for row in conn.execute(text("PRAGMA table_info(feedback_log)"))]
+            if fl_cols and 'wamid' not in fl_cols:
+                conn.execute(text("ALTER TABLE feedback_log ADD COLUMN wamid VARCHAR(100)"))
+                conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_feedback_log_wamid ON feedback_log (wamid)"))
+                conn.commit()
+                logger.info("Migrated feedback_log: added wamid column (re-taps on the same message now update in place)")
+
+            if us_cols and 'last_event_nudge_date' not in us_cols:
+                conn.execute(text(
+                    "ALTER TABLE user_sessions ADD COLUMN last_event_nudge_date VARCHAR(10)"
+                ))
+                conn.commit()
+                logger.info("Migrated user_sessions: added last_event_nudge_date column")
 
     # User Authentication Methods
     def register_user(self, username: str, email: str, password: str, fullname: str = "", role: str = 'admin') -> Tuple[bool, str]:
@@ -615,6 +678,116 @@ class FileUploadManager:
         finally:
             session.close()
 
+    def log_feedback(self, session_key: str, question: str, answer: str, rating: str, wamid: str | None = None) -> None:
+        """Record a 👍/👎 tap. `rating` is 'up' or 'down'. When `wamid` is
+        given (the exact button message being rated) and a row for that
+        wamid already exists — a re-tap on the same message — update its
+        rating/rated_at in place instead of inserting a duplicate row.
+        The update only goes one direction: down -> up is honored (they
+        reconsidered and the answer turned out fine), but up -> down is not
+        (an already-positive rating can't be walked back by a later tap) —
+        WhatsApp gives no way to disable the buttons after the first tap, so
+        this is the backend's way of making a second tap not meaningfully
+        flip-flop a rating once it's positive."""
+        session = self.Session()
+        try:
+            existing = None
+            if wamid:
+                existing = session.query(FeedbackLog).filter(FeedbackLog.wamid == wamid).first()
+            if existing and existing.rating == "up" and rating == "down":
+                return
+            if existing:
+                existing.rating = rating
+                existing.rated_at = datetime.utcnow()
+            else:
+                session.add(FeedbackLog(session_key=session_key, question=question, answer=answer, rating=rating, wamid=wamid))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error logging feedback: {e}")
+        finally:
+            session.close()
+
+    def record_feedback_prompt(self, wamid: str, session_key: str, question: str, answer: str) -> None:
+        """Remember which question+answer a just-sent feedback-button message
+        was for, keyed by its WhatsApp message id — so a tap on it (even a
+        late one, after more messages have gone back and forth) can be
+        attributed correctly instead of guessed. See FeedbackPrompt docstring."""
+        if not wamid:
+            return
+        session = self.Session()
+        try:
+            session.add(FeedbackPrompt(wamid=wamid, session_key=session_key, question=question, answer=answer))
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error recording feedback prompt: {e}")
+        finally:
+            session.close()
+
+    def get_feedback_prompt(self, wamid: str) -> Optional[Dict]:
+        """Look up the question+answer a feedback-button tap belongs to, by
+        the wamid WhatsApp's reply `context.id` points at. Returns None if
+        this wamid was never recorded (e.g. a button sent before this
+        feature existed) — caller should fall back gracefully."""
+        if not wamid:
+            return None
+        session = self.Session()
+        try:
+            row = session.query(FeedbackPrompt).filter(FeedbackPrompt.wamid == wamid).first()
+            if not row:
+                return None
+            return {"session_key": row.session_key, "question": row.question, "answer": row.answer}
+        except Exception as e:
+            logger.error(f"Error looking up feedback prompt: {e}")
+            return None
+        finally:
+            session.close()
+
+    def get_feedback_for_session(self, session_key: str) -> List[Dict]:
+        """Every rating for one session, oldest first — used to attach a
+        rating next to the specific answer it was for in the chat viewer
+        and the export."""
+        session = self.Session()
+        try:
+            rows = (
+                session.query(FeedbackLog)
+                .filter(FeedbackLog.session_key == session_key)
+                .order_by(FeedbackLog.rated_at.asc())
+                .all()
+            )
+            return [
+                {
+                    "question": row.question,
+                    "answer": row.answer,
+                    "rating": row.rating,
+                    "rated_at": row.rated_at.isoformat() if row.rated_at else None,
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            logger.error(f"Error fetching feedback for {session_key}: {e}")
+            return []
+        finally:
+            session.close()
+
+    def get_feedback_summary(self, session_key: str) -> Dict:
+        """{'up': N, 'down': M} rollup for one session — powers the compact
+        badge in the WhatsApp session list (individual ratings would be too
+        many to show inline there once a conversation spans weeks)."""
+        session = self.Session()
+        try:
+            up = session.query(FeedbackLog).filter(
+                FeedbackLog.session_key == session_key, FeedbackLog.rating == "up"
+            ).count()
+            down = session.query(FeedbackLog).filter(
+                FeedbackLog.session_key == session_key, FeedbackLog.rating == "down"
+            ).count()
+            return {"up": up, "down": down}
+        except Exception as e:
+            logger.error(f"Error fetching feedback summary for {session_key}: {e}")
+            return {"up": 0, "down": 0}
+        finally:
+            session.close()
+
     def get_whatsapp_sessions(self) -> List[Dict]:
         """List every WhatsApp session (phone numbers only — web-<username>
         sessions excluded), most recently active first, with a message
@@ -646,6 +819,43 @@ class FileUploadManager:
         finally:
             session.close()
 
+    def get_whatsapp_summary_stats(self) -> Dict:
+        """Aggregate counts for the WhatsApp tab's summary bar — people,
+        real questions asked, and feedback tally. Scoped to WhatsApp
+        sessions only (phone-number keys), same "web-%" exclusion as
+        get_whatsapp_sessions. Cheap: plain counts, no per-session history
+        replay (unlike the export, which needs the actual Q&A pairs)."""
+        session = self.Session()
+        try:
+            people = session.query(UserSession).filter(~UserSession.session_key.like("web-%")).count()
+            questions = session.query(QuestionLog).filter(QuestionLog.channel == "whatsapp").count()
+            positive = session.query(FeedbackLog).filter(
+                ~FeedbackLog.session_key.like("web-%"), FeedbackLog.rating == "up"
+            ).count()
+            negative = session.query(FeedbackLog).filter(
+                ~FeedbackLog.session_key.like("web-%"), FeedbackLog.rating == "down"
+            ).count()
+            return {"people": people, "questions": questions, "positive": positive, "negative": negative}
+        except Exception as e:
+            logger.error(f"Error computing WhatsApp summary stats: {e}")
+            return {"people": 0, "questions": 0, "positive": 0, "negative": 0}
+        finally:
+            session.close()
+
+    def get_all_whatsapp_questions(self) -> List[str]:
+        """Every logged WhatsApp question's raw text — feeds the summary
+        bar's "distinct topics" count (clustered + cached in agent.py, since
+        embedding-based clustering is too slow to redo on every page load)."""
+        session = self.Session()
+        try:
+            rows = session.query(QuestionLog.question).filter(QuestionLog.channel == "whatsapp").all()
+            return [r[0] for r in rows]
+        except Exception as e:
+            logger.error(f"Error fetching all WhatsApp questions: {e}")
+            return []
+        finally:
+            session.close()
+
     def get_user_data(self, session_key: str) -> Dict:
         """Reconstruct the same dict shape the old data/users/*.json files
         held: {"phone": ..., "email": ..., "history": [...], "segment": ...,
@@ -660,7 +870,19 @@ class FileUploadManager:
                 .order_by(ChatMessage.id.asc())
                 .all()
             )
-            history = [{"role": m.role, "content": m.content} for m in messages]
+            history = [
+                {
+                    "role": m.role,
+                    "content": m.content,
+                    # ISO 8601 with an explicit UTC 'Z' — created_at is stored via
+                    # datetime.utcnow() (naive UTC), and the 'Z' is what makes
+                    # JS's `new Date(...)` parse it as UTC and convert to the
+                    # viewer's own local time, instead of misreading it as
+                    # already-local and rendering the wrong clock time.
+                    "created_at": (m.created_at.isoformat() + "Z") if m.created_at else None,
+                }
+                for m in messages
+            ]
             if row is None:
                 return {"phone": session_key, "email": None, "history": history}
             data = {"phone": session_key, "email": row.email, "history": history}
@@ -670,6 +892,10 @@ class FileUploadManager:
                 data["segment_asked"] = row.segment_asked
             if row.last_message_at:
                 data["last_message_at"] = row.last_message_at
+            if row.last_feedback_prompted_date:
+                data["last_feedback_prompted_date"] = row.last_feedback_prompted_date
+            if row.last_event_nudge_date:
+                data["last_event_nudge_date"] = row.last_event_nudge_date
             return data
         except Exception as e:
             logger.error(f"Error reading user session {session_key}: {e}")
@@ -678,9 +904,17 @@ class FileUploadManager:
             session.close()
 
     def save_user_data(self, session_key: str, data: Dict) -> None:
-        """Persist the full dict back — upserts the session row, and
-        replaces the message rows wholesale (simple, avoids delta-tracking;
-        realistic history lengths make this cheap)."""
+        """Persist the full dict back — upserts the session row. Message
+        rows are append-only: every caller only ever appends new turns to
+        `data["history"]` before calling this (never edits or reorders an
+        existing entry), so only the turns beyond what's already stored get
+        inserted. This matters beyond efficiency — it's what lets each
+        ChatMessage keep its real, original `created_at` instead of every
+        row being reset to "now" on every single turn, which is what a
+        wholesale delete-and-reinsert (the previous approach) did. The one
+        exception is a shrink (e.g. /chat/reset clearing history to []) —
+        append-only can't reconcile fewer rows than already stored, so that
+        case still falls back to a full wipe."""
         session = self.Session()
         try:
             row = session.query(UserSession).filter(UserSession.session_key == session_key).first()
@@ -691,9 +925,19 @@ class FileUploadManager:
             row.segment = data.get("segment")
             row.segment_asked = bool(data.get("segment_asked", False))
             row.last_message_at = data.get("last_message_at")
+            row.last_feedback_prompted_date = data.get("last_feedback_prompted_date")
+            row.last_event_nudge_date = data.get("last_event_nudge_date")
 
-            session.query(ChatMessage).filter(ChatMessage.session_key == session_key).delete()
-            for m in data.get("history", []):
+            new_history = data.get("history", [])
+            existing_count = (
+                session.query(ChatMessage)
+                .filter(ChatMessage.session_key == session_key)
+                .count()
+            )
+            if len(new_history) < existing_count:
+                session.query(ChatMessage).filter(ChatMessage.session_key == session_key).delete()
+                existing_count = 0
+            for m in new_history[existing_count:]:
                 session.add(ChatMessage(session_key=session_key, role=m["role"], content=m["content"]))
             session.commit()
         except Exception as e:

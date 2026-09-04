@@ -222,11 +222,14 @@ def _claude_code_isolated_dirs() -> tuple[str, str]:
     return home, cwd
 
 
-def _generate_reply_claude_code_cli(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
+def _generate_reply_claude_code_cli(
+    user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None,
+    include_event_nudge: bool = False,
+) -> tuple[str, bool, bool]:
     """Same contract as the other _generate_reply_* functions, via the
     Claude Code CLI (`claude -p ...`) instead of an SDK/HTTP call. See the
     module comment above for why this path needs the isolated home/cwd."""
-    system_prompt = build_system_prompt(kb_context, profile_block, segment)
+    system_prompt = build_system_prompt(kb_context, profile_block, segment, include_event_nudge)
     # The CLI is a single-shot prompt-in/text-out tool, not a structured
     # messages array — fold recent turns into the prompt text itself.
     history = user_data["history"][-MAX_HISTORY:]
@@ -857,14 +860,6 @@ timeline, and never calculate or confirm specific F&F amounts, deductions, or re
 "HRBP" when answering exit-related questions.
 - Onboarding/induction days: induction usually happens only on Mondays and Tuesdays. There are no \
 new joinings from the 26th to the end of any month — joining dates only fall on or before the 25th.
-- Today/tomorrow's event nudge: check the current month's Engagement Calendar / Holiday Calendar \
-section against TODAY'S DATE above. If there is an event, holiday, or tournament dated today or \
-tomorrow, mention it briefly at the END of your reply (after answering whatever was actually asked) \
-— e.g. "Also, quick heads up: [Event] is today/tomorrow! 🎉". Do this on every reply where such an \
-event exists, not just when the person asks about events. If there is no event today or tomorrow, \
-don't add anything — never invent one or mention a farther-off date to fill this in. Never surface \
-"Teacher's Day" as a today/tomorrow event nudge (or as an event at all) even if it appears anywhere \
-in the KNOWLEDGE BASE — Recykal does not treat it as an event to flag.
 
 ################  YOUR GOAL  ################
 Help the person you're chatting with feel welcomed and get their questions answered accurately \
@@ -914,7 +909,25 @@ get deflected to People & Culture.
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def build_system_prompt(kb_context: str, profile_block: str | None = None, segment: str | None = None) -> str:
+EVENT_NUDGE_BLOCK = (
+    "################  TODAY/TOMORROW EVENT NUDGE  ################\n"
+    "Check the current month's Engagement Calendar / Holiday Calendar section against "
+    "TODAY'S DATE above. If there is an event, holiday, or tournament dated today or "
+    "tomorrow, mention it briefly at the END of your reply (after answering whatever was "
+    "actually asked) — e.g. \"Also, quick heads up: [Event] is today/tomorrow! 🎉\". If "
+    "there is no event today or tomorrow, don't add anything — never invent one or mention "
+    "a farther-off date to fill this in. Never surface \"Teacher's Day\" as this nudge (or "
+    "as an event at all) even if it appears in the KNOWLEDGE BASE — Recykal does not treat "
+    "it as an event to flag. This nudge is being offered to you now because this person "
+    "hasn't been given it yet today — once per person per day is enough, so don't repeat it "
+    "again later today even if it would otherwise apply."
+)
+
+
+def build_system_prompt(
+    kb_context: str, profile_block: str | None = None, segment: str | None = None,
+    include_event_nudge: bool = False,
+) -> str:
     today = datetime.now(IST).strftime("%A, %d %B %Y")
     parts = [
         PERSONA_RULES,
@@ -929,6 +942,8 @@ def build_system_prompt(kb_context: str, profile_block: str | None = None, segme
         f"same answer — this is today's date compared against a fixed published calendar, "
         f"not something that depends on who's asking.",
     ]
+    if include_event_nudge:
+        parts.append(EVENT_NUDGE_BLOCK)
     if segment in SEGMENT_FRAMING:
         parts.append(SEGMENT_FRAMING[segment])
     if profile_block:
@@ -1271,6 +1286,22 @@ def should_show_disclaimer(user_data: dict) -> bool:
 
 def touch_last_message(user_data: dict):
     user_data["last_message_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def should_include_event_nudge(user_data: dict) -> bool:
+    """True at most once per calendar day (India time) per person — a
+    today/tomorrow event heads-up is useful once, but repeating it on every
+    single reply in a busy conversation gets noisy fast. Marking this used
+    happens unconditionally in whatsapp webhook handling once this returns
+    True for a turn (see touch_event_nudge), the same "offer once, don't
+    verify the model actually used it" approximation as show_disclaimer."""
+    last_date = user_data.get("last_event_nudge_date")
+    today_str = datetime.now(IST).strftime("%Y-%m-%d")
+    return last_date != today_str
+
+
+def touch_event_nudge(user_data: dict):
+    user_data["last_event_nudge_date"] = datetime.now(IST).strftime("%Y-%m-%d")
 
 
 # --- WhatsApp provider selection --------------------------------------------
@@ -1643,7 +1674,10 @@ def _welcome_template_configured() -> bool:
     return bool(TWILIO_WELCOME_TEMPLATE_SID)
 
 
-def generate_reply(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
+def generate_reply(
+    user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None,
+    include_event_nudge: bool = False,
+) -> tuple[str, bool, bool]:
     """Dispatches to whichever LLM_PROVIDER is configured. All branches
     share the exact same contract: (reply_text, unanswered, is_meta) — see
     META_REPLY_MARKER for what is_meta means.
@@ -1655,19 +1689,22 @@ def generate_reply(user_data: dict, kb_context: str, profile_block: str | None =
     Falling back changes which model answered, never whether the answer is
     still grounded — both paths share the same system prompt/KB context."""
     if LLM_PROVIDER == "claude":
-        return _generate_reply_claude(user_data, kb_context, profile_block, segment)
+        return _generate_reply_claude(user_data, kb_context, profile_block, segment, include_event_nudge)
     if LLM_PROVIDER == "claude_code_cli":
         try:
-            return _generate_reply_claude_code_cli(user_data, kb_context, profile_block, segment)
+            return _generate_reply_claude_code_cli(user_data, kb_context, profile_block, segment, include_event_nudge)
         except Exception as e:
             logger.warning(f"claude_code_cli failed ({e}) — falling back to DeepSeek for this reply")
-            return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
-    return _generate_reply_deepseek(user_data, kb_context, profile_block, segment)
+            return _generate_reply_deepseek(user_data, kb_context, profile_block, segment, include_event_nudge)
+    return _generate_reply_deepseek(user_data, kb_context, profile_block, segment, include_event_nudge)
 
 
-def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
+def _generate_reply_claude(
+    user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None,
+    include_event_nudge: bool = False,
+) -> tuple[str, bool, bool]:
     """Same contract as _generate_reply_deepseek, via the Claude API instead."""
-    system_prompt = build_system_prompt(kb_context, profile_block, segment)
+    system_prompt = build_system_prompt(kb_context, profile_block, segment, include_event_nudge)
     messages = user_data["history"][-MAX_HISTORY:]
     # Claude requires the first message be role "user" (unlike the
     # OpenAI-compatible shape DeepSeek accepts) — a slice that happens to
@@ -1700,11 +1737,14 @@ def _generate_reply_claude(user_data: dict, kb_context: str, profile_block: str 
         ), False, True
 
 
-def _generate_reply_deepseek(user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None) -> tuple[str, bool, bool]:
+def _generate_reply_deepseek(
+    user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None,
+    include_event_nudge: bool = False,
+) -> tuple[str, bool, bool]:
     """Call DeepSeek with retrieved KB context + candidate profile + recent
     history. Returns (reply_text, unanswered) — unanswered is True only when
     the model tagged this as a genuine knowledge-base gap (see UNANSWERED_MARKER)."""
-    messages = [{"role": "system", "content": build_system_prompt(kb_context, profile_block, segment)}]
+    messages = [{"role": "system", "content": build_system_prompt(kb_context, profile_block, segment, include_event_nudge)}]
     messages.extend(user_data["history"][-MAX_HISTORY:])
     try:
         resp = requests.post(
@@ -1915,6 +1955,7 @@ async def whatsapp_webhook(request: Request):
 
         user_data = get_user_data(phone)
         show_disclaimer = should_show_disclaimer(user_data)
+        include_event_nudge = should_include_event_nudge(user_data)
 
         # Match the caller against the onboarding log (if configured).
         candidate = DIRECTORY.lookup(phone)
@@ -2012,7 +2053,11 @@ async def whatsapp_webhook(request: Request):
         # a slow subprocess (~15-20s) — without to_thread, that one call
         # would stall the entire server, queuing every other incoming
         # WhatsApp message behind it instead of answering them concurrently.
-        reply, unanswered, is_meta = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block, segment)
+        reply, unanswered, is_meta = await asyncio.to_thread(
+            generate_reply, user_data, kb_context, profile_block, segment, include_event_nudge,
+        )
+        if include_event_nudge:
+            touch_event_nudge(user_data)
         if not media:
             # Document-upload turns are synthetic, not a real question — skip logging those.
             upload_manager.log_question(phone, "whatsapp", incoming_message, unanswered, segment)
@@ -2084,6 +2129,7 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         session_key = f"web-{current_user['username']}"
         user_data = get_user_data(session_key)
         show_disclaimer = should_show_disclaimer(user_data)
+        include_event_nudge = should_include_event_nudge(user_data)
 
         # Optional explicit override so HR can preview either segment's
         # experience directly, instead of going through the ask-once flow.
@@ -2103,7 +2149,11 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         kb_context = retrieve_context(message, segment, extra_query=blended)
 
         user_data["history"].append({"role": "user", "content": message})
-        reply, unanswered, _is_meta = await asyncio.to_thread(generate_reply, user_data, kb_context, profile_block=None, segment=segment)
+        reply, unanswered, _is_meta = await asyncio.to_thread(
+            generate_reply, user_data, kb_context, None, segment, include_event_nudge,
+        )
+        if include_event_nudge:
+            touch_event_nudge(user_data)
         upload_manager.log_question(session_key, "web", message, unanswered, segment)
         if should_ask_segment:
             reply += SEGMENT_QUESTION
