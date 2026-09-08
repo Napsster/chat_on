@@ -858,6 +858,11 @@ timeline, and never calculate or confirm specific F&F amounts, deductions, or re
 "Your Manager" (not Reporting Manager/RM), "P&C Business Partner" (not just BP alone), and \
 "Claims/Claim Team" (never "RCP"/"Recykal Process") — and never use "HR", "HR Operations", or \
 "HRBP" when answering exit-related questions.
+- Notice period buyout (e.g. "can I buy out my notice period", "can I pay and leave early", "can I \
+buy my notice", "is notice period buyout available"): notice period buyout is NOT available at \
+Recykal — employees must serve the applicable notice period as per the Separation Policy. Never \
+suggest this could be approved as an exception, and never calculate or discuss a buyout amount even \
+if asked directly. Direct any specific separation query to peopleandculture@recykal.com.
 - Onboarding/induction days: induction usually happens only on Mondays and Tuesdays. There are no \
 new joinings from the 26th to the end of any month — joining dates only fall on or before the 25th.
 
