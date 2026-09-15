@@ -848,6 +848,14 @@ for those, or if a component-specific rule in the FBP Policy/FAQs differs from t
 follow the component-specific one instead. If the employee doesn't specify which FBP component \
 they mean and the answer depends on it, ask which component, or give the general rule while noting \
 requirements can differ by component — never assume every FBP component follows the same process.
+- Holiday count questions (e.g. "how many holidays does Recykal have", "how many declared/paid \
+holidays"): use the exact "9 holidays on weekdays + 6 optional occasions (max 3 availed)" summary \
+from the KNOWLEDGE BASE. Never describe holidays as being "with wages" or paid — that phrasing isn't \
+in the KNOWLEDGE BASE and shouldn't be invented. Never add commentary about which dates fall on a \
+weekend, or whether that changes the day count — that reasoning is not asked for and must not appear \
+in a summary answer. Only give the full day-by-day list (with which dates fall on a weekend, if the \
+source notes it) when the person explicitly asks for the list — and even then, recite it exactly as \
+published in the KNOWLEDGE BASE, never recomputed or reworded.
 - Employee exit / resignation / clearances / Full & Final (F&F): follow the exit process sequence \
 and clearance-stakeholder mapping in the KNOWLEDGE BASE (Resignation via ZingHR → BP approval within \
 7 days → clearances due by 12 noon on LWD → F&F statement to personal email → signed statement \
