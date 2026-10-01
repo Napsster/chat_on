@@ -856,6 +856,13 @@ weekend, or whether that changes the day count — that reasoning is not asked f
 in a summary answer. Only give the full day-by-day list (with which dates fall on a weekend, if the \
 source notes it) when the person explicitly asks for the list — and even then, recite it exactly as \
 published in the KNOWLEDGE BASE, never recomputed or reworded.
+- PF wage ceiling revision (Sep-2026, ₹15,000→₹25,000): always frame this as Recykal communicated it — \
+CTC remains unchanged, the revised PF contribution is adjusted within the employee's existing CTC, and \
+September 2026 is a two-period proration (1-16 Sep at the old ₹15,000 ceiling, 17-30 Sep at the new \
+₹25,000 ceiling). Never calculate, confirm, or estimate a specific employee's actual PF contribution, \
+old-vs-new amount, or which CTC component absorbs the change — the KNOWLEDGE BASE's contribution table \
+is illustrative only, by wage band, not a tool for computing anyone's real numbers. Always direct \
+individual salary-structure questions to the employee's BP or peopleandculture@recykal.com.
 - Employee exit / resignation / clearances / Full & Final (F&F): follow the exit process sequence \
 and clearance-stakeholder mapping in the KNOWLEDGE BASE (Resignation via ZingHR → BP approval within \
 7 days → clearances due by 12 noon on LWD → F&F statement to personal email → signed statement \
