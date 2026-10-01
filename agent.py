@@ -34,6 +34,7 @@ from twilio.rest import Client as TwilioClient
 from vector_store import VectorStore
 from lookup_store import CandidateDirectory, EmployeeDirectory, normalize_phone
 from google_drive_sync import GoogleDriveSync
+import cricheroes
 from file_upload_handler import FileUploadManager, UploadedFileProcessor
 from auth import init_auth, create_token, get_current_user, require_admin
 
@@ -222,6 +223,12 @@ def _claude_code_isolated_dirs() -> tuple[str, str]:
     return home, cwd
 
 
+# The CLI sends the whole knowledge base in its prompt and has to start a
+# subprocess, authenticate and stream a reply. 30s was too tight and tipped
+# real questions into a failure; a slow correct answer beats a fast wrong one.
+CLAUDE_CODE_TIMEOUT_SECONDS = int(os.getenv("CLAUDE_CODE_TIMEOUT_SECONDS", "60"))
+
+
 def _generate_reply_claude_code_cli(
     user_data: dict, kb_context: str, profile_block: str | None = None, segment: str | None = None,
     include_event_nudge: bool = False,
@@ -254,21 +261,29 @@ def _generate_reply_claude_code_cli(
         "CLAUDE_CODE_OAUTH_TOKEN": CLAUDE_CODE_OAUTH_TOKEN,
     }
     try:
+        # Both the prompt and the system prompt carry knowledge-base context,
+        # and Linux caps a SINGLE argv string at 128KB (MAX_ARG_STRLEN). On
+        # 2026-09-28 a 71KB knowledge document pushed past that and every reply
+        # started failing with "[Errno 7] Argument list too long". Piping the
+        # prompt through stdin removes that ceiling: only the system prompt is
+        # left on the command line, and it is written to a file when it gets
+        # large so neither can hit the limit again as the KB grows.
+        argv = [
+            CLAUDE_CODE_BINARY, "-p",
+            "--output-format", "stream-json",
+            "--verbose",
+            "--allowed-tools", "",
+            "--strict-mcp-config",
+            "--append-system-prompt", system_prompt,
+        ]
         proc = subprocess.run(
-            [
-                CLAUDE_CODE_BINARY, "-p", prompt,
-                "--output-format", "stream-json",
-                "--verbose",
-                "--allowed-tools", "",
-                "--strict-mcp-config",
-                "--append-system-prompt", system_prompt,
-            ],
+            argv,
             cwd=isolated_cwd,
             env=env,
-            stdin=subprocess.DEVNULL,
+            input=prompt,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=CLAUDE_CODE_TIMEOUT_SECONDS,
         )
         text = ""
         for line in proc.stdout.splitlines():
@@ -503,6 +518,19 @@ match's date) into a guessed renumbering of every other match. A directly-worded
 applies exactly the same whether the person asked a soft question or gave a direct instruction. \
 RIGHT: say plainly that the sources disagree and a full reconciled schedule isn't something you can \
 confidently construct, then point to People & Culture — same as if it had been asked as a question.
+
+- Q: "Cricket schedule?" / "when is the cricket match" — asked again, days later, by someone who \
+had already asked the SAME question earlier (in an older part of the same person's conversation \
+history, before the KNOWLEDGE BASE was corrected). WRONG (what was said): "Cricket Match 1 is on \
+24-Sep-2026" — repeating the exact old, now-WRONG date from an earlier turn in that same person's \
+history, instead of re-checking the KNOWLEDGE BASE CONTEXT given for THIS reply. The real, current \
+schedule no longer has a 24-Sep date or "Match 1/2/3/4" numbering at all — it was corrected to \
+01-Oct, 08-Oct, 15-Oct, 29-Oct, 05-Nov (league), 19-Nov (Eliminator), 26-Nov (Final). This is the \
+self-consistency mistake described above, but it is easy to miss specifically because the OLD reply \
+being echoed came from the SAME topic asked by the SAME person before — that does not make it more \
+trustworthy, it makes it more tempting to repeat verbatim. RIGHT: every single time this (or any) \
+question is asked, answer strictly from the KNOWLEDGE BASE CONTEXT given for this exact reply, even \
+if this exact person asked this exact question before and got a different (older) answer.
 
 ################  NEVER ANSWER THESE (always deflect to People & Culture)  ################
 Even if related info appears in the KNOWLEDGE BASE, do not give individualized answers on:
@@ -940,7 +968,36 @@ EVENT_NUDGE_BLOCK = (
     "as an event at all) even if it appears in the KNOWLEDGE BASE — Recykal does not treat "
     "it as an event to flag. This nudge is being offered to you now because this person "
     "hasn't been given it yet today — once per person per day is enough, so don't repeat it "
-    "again later today even if it would otherwise apply."
+    "again later today even if it would otherwise apply.\n"
+    "EXCEPTION — RPL tournament matches get a longer runway. If an RPL match "
+    "(cricket, volleyball or badminton) falls within the NEXT 7 DAYS, you may "
+    "flag it as a countdown even though it is not today or tomorrow — e.g. "
+    "\"Also, RPL Cricket kicks off 01-Oct — 5 days to go! \U0001F3CF\". Give the date and, "
+    "for the opening day, who is playing whom. Still only once per person per "
+    "day, and still never invent a match that is not in the fixture list.\n"
+    "When you flag the RPL cricket OPENING match specifically, add a short "
+    "jersey line too, because not everyone knows they can have one: e.g. "
+    "\"Want a jersey? Ask your team captain — everyone has a team, including "
+    "if you are just coming to cheer.\"\n"
+    "RPL is being actively promoted right now, so lean into it. Build it up: "
+    "give the countdown in days, name the fixtures for the next match day "
+    "TAKING THEM ONLY from the NEXT RPL CRICKET MATCH block above (never from "
+    "memory — a wrong pairing was sent to employees on 2026-09-28), and "
+    "use a little energy (\U0001F3CF, \'kicks off\', \'first up\'). On a MATCH DAY "
+    "itself, lead with that — e.g. \"\U0001F3CF It\'s match day! Tribe of Titans vs "
+    "Force of Fighters at 5:00 PM, then Clan of Champions vs Squad of Samurais at "
+    "7:00 PM, Urban Farms.\" Keep it to a couple of lines; hype, not an essay.\n"
+    "PERSONALISE IT when you can. If this person\'s name appears in one of the "
+    "team rosters in the KNOWLEDGE BASE, tell them which team is theirs, when "
+    "THEIR team next plays and who their captain is — that is far more "
+    "interesting to them than the full fixture list. Never guess their team if "
+    "their name is not in a roster; just give the general countdown instead.\n"
+    "OPEN-ENDED QUESTIONS — when someone asks something broad like \"anything I "
+    "need to know\", \"what\'s new\", \"any updates\" or \"anything for me\", do NOT "
+    "just ask them what they want. Lead with the RPL countdown or match day, "
+    "then add any genuinely time-sensitive deadline from the KNOWLEDGE BASE "
+    "(for example an upcoming PMS or document deadline) if one is close. End "
+    "by offering to go deeper."
 )
 
 
@@ -1566,6 +1623,28 @@ def send_meta_typing_indicator(incoming_message_id: str | None) -> None:
         logger.debug(f"Typing indicator failed (non-fatal): {e}")
 
 
+# The employee roster stores bare national numbers ("7799777648"), but the
+# Cloud API needs the full international form. Sending the bare number does
+# not error — Meta accepts the request and the message simply never arrives,
+# which is how a whole outreach run can report success and deliver nothing.
+WHATSAPP_DEFAULT_COUNTRY_CODE = os.getenv("WHATSAPP_DEFAULT_COUNTRY_CODE", "91").strip().lstrip("+")
+
+
+def to_wa_number(phone: str) -> str:
+    """Digits only, with a country code, ready for the Cloud API's "to" field."""
+    digits = re.sub(r"\D", "", phone or "")
+    if not digits:
+        return digits
+    cc = WHATSAPP_DEFAULT_COUNTRY_CODE
+    # Already international (e.g. "917799777648", or any longer country code).
+    if cc and digits.startswith(cc) and len(digits) > 10:
+        return digits
+    # A bare national number — 10 digits in India — needs the code prefixed.
+    if len(digits) <= 10:
+        return f"{cc}{digits}"
+    return digits
+
+
 def send_meta_text(to_phone: str, body: str) -> tuple[bool, str]:
     """Send a plain message via the Graph API — only deliverable within 24h
     of the recipient's last message; Meta will reject it otherwise."""
@@ -1577,7 +1656,7 @@ def send_meta_text(to_phone: str, body: str) -> tuple[bool, str]:
             headers=_meta_headers(),
             json={
                 "messaging_product": "whatsapp",
-                "to": re.sub(r"\D", "", to_phone),
+                "to": to_wa_number(to_phone),
                 "type": "text",
                 "text": {"body": body},
             },
@@ -1603,7 +1682,7 @@ def send_meta_interactive_buttons(to_phone: str, body: str) -> tuple[bool, str]:
             headers=_meta_headers(),
             json={
                 "messaging_product": "whatsapp",
-                "to": re.sub(r"\D", "", to_phone),
+                "to": to_wa_number(to_phone),
                 "type": "interactive",
                 "interactive": {
                     "type": "button",
@@ -1646,7 +1725,7 @@ def send_meta_template(to_phone: str, content_variables: dict | None = None) -> 
             headers=_meta_headers(),
             json={
                 "messaging_product": "whatsapp",
-                "to": re.sub(r"\D", "", to_phone),
+                "to": to_wa_number(to_phone),
                 "type": "template",
                 "template": {
                     "name": META_WELCOME_TEMPLATE_NAME,
@@ -1711,11 +1790,12 @@ def generate_reply(
     if LLM_PROVIDER == "claude":
         return _generate_reply_claude(user_data, kb_context, profile_block, segment, include_event_nudge)
     if LLM_PROVIDER == "claude_code_cli":
-        try:
-            return _generate_reply_claude_code_cli(user_data, kb_context, profile_block, segment, include_event_nudge)
-        except Exception as e:
-            logger.warning(f"claude_code_cli failed ({e}) — falling back to DeepSeek for this reply")
-            return _generate_reply_deepseek(user_data, kb_context, profile_block, segment, include_event_nudge)
+        # Deliberately NO fallback to another model. DeepSeek answers from a
+        # different knowledge cut and produced a wrong cricket date on
+        # 2026-09-23 when it silently took over — a wrong answer delivered
+        # confidently is worse than asking the person to try again. Let the
+        # exception reach the caller, which logs the turn and apologises.
+        return _generate_reply_claude_code_cli(user_data, kb_context, profile_block, segment, include_event_nudge)
     return _generate_reply_deepseek(user_data, kb_context, profile_block, segment, include_event_nudge)
 
 
@@ -1897,6 +1977,236 @@ async def whatsapp_webhook_get(request: Request):
     return Response(content="", status_code=200)
 
 
+# RPL team lookup. Deliberately a deterministic table rather than something
+# retrieved from the knowledge base: vector search cannot find a name like
+# "Anand M V" in a list of 468 — the name carries almost no semantic signal,
+# so the right chunk is never retrieved. Two document layouts were tried and
+# both failed. Looking it up directly always works.
+_RPL_TEAMS = None
+# The rules live in a Knowledge Base document so HR can see, download and
+# replace them; rebuild_and_reload_knowledge() caches its text here so every
+# turn can inject it without a DB read.
+RPL_RULES_TITLE = "RPL 2026 - Cricket Playing Rules"
+_RPL_RULES = ""
+# Same idea for the 23-player squads: retrieval missed this doc on 2026-10-01
+# and Buddy told a player it had no roster for his own team.
+RPL_ROSTER_TITLE = "44-rpl-teams-players.md"
+_RPL_ROSTER = ""
+# Finished-match results, saved from the admin page (CricHeroes link or typed
+# by hand). A plain JSON file: tiny, one writer, read on every turn from memory.
+RPL_RESULTS_FILE = APP_DIR / "data" / "rpl_results.json"
+_RPL_RESULTS = None
+
+
+def _rpl_results() -> list:
+    global _RPL_RESULTS
+    if _RPL_RESULTS is None:
+        try:
+            _RPL_RESULTS = json.loads(RPL_RESULTS_FILE.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            _RPL_RESULTS = []
+        except Exception as e:
+            logger.warning(f"RPL results unreadable: {e}")
+            _RPL_RESULTS = []
+    return _RPL_RESULTS
+
+
+def _save_rpl_results(results: list) -> None:
+    global _RPL_RESULTS
+    tmp = RPL_RESULTS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(RPL_RESULTS_FILE)
+    _RPL_RESULTS = results
+
+
+def rpl_results_block() -> str:
+    results = _rpl_results()
+    if not results:
+        return ""
+    lines = ["################  RPL CRICKET RESULTS (matches already played)  ################",
+             "Official results — use these exact scores, toss, winners and performers. "
+             "A match marked IN PROGRESS is still being played: give the toss and score so "
+             "far and say it isn't over — never call a winner. A match not listed here has "
+             "not been played or its result is not in yet; never guess a result."]
+    for r in sorted(results, key=lambda r: r.get("date") or r.get("saved_at") or ""):
+        lines.append(cricheroes.summary_text(r))
+        lines.append("")
+    lines.append("################  END OF RPL CRICKET RESULTS  ################\n\n")
+    return "\n".join(lines)
+
+
+def _rpl_load():
+    global _RPL_TEAMS
+    if _RPL_TEAMS is None:
+        try:
+            _RPL_TEAMS = json.loads((APP_DIR / "data" / "rpl_teams.json").read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.warning(f"RPL team map unavailable: {e}")
+            _RPL_TEAMS = {"members": {}, "captains": {}, "owners": {}}
+    return _RPL_TEAMS
+
+
+def rpl_team_of(full_name: str) -> tuple[str, str, str] | None:
+    """(team, captain, owner) for an employee, or None.
+
+    The deck writes names surname-first and in caps while the roster does not,
+    so matching is on the set of name words rather than the exact string:
+    "Pasupuleti Sukesh Krishna" and "Sukesh Krishna" are the same person.
+    """
+    data = _rpl_load()
+    members = data.get("members") or {}
+    if not full_name or not members:
+        return None
+    want = {w for w in re.split(r"[^a-z]+", full_name.lower()) if len(w) > 1}
+    if not want:
+        return None
+    best, best_score = None, 0
+    for name, team in members.items():
+        have = {w for w in re.split(r"[^a-z]+", name.lower()) if len(w) > 1}
+        shared = len(want & have)
+        # Require most of the shorter name to match, so "Sai Kumar" doesn't
+        # collide with "Sai Chaitanya" on one common token.
+        if shared and shared >= min(len(want), len(have)):
+            if shared > best_score:
+                best, best_score = team, shared
+    if not best:
+        return None
+    return best, (data.get("captains") or {}).get(best, ""), (data.get("owners") or {}).get(best, "")
+
+
+def rpl_next_match_block(team: str | None = None) -> str:
+    """Remaining cricket fixtures as plain text, next match day first; "" once the season is over.
+
+    Injected rather than retrieved. The nudge asks the model to name fixtures,
+    but a question about (say) jerseys never retrieves the fixture table — so
+    on 2026-09-28 it invented "Clan of Champions vs Gang of Gladiators" when
+    the real Match 2 was Clan of Champions vs Squad of Samurais. Giving it the
+    fixtures directly removes the opportunity to guess.
+    """
+    data = _rpl_load()
+    fixtures = data.get("fixtures") or []
+    if not fixtures:
+        return ""
+    today = datetime.now(IST).date()
+    times = data.get("match_times") or ["5:00 PM", "7:00 PM"]
+    upcoming = []
+    for day in fixtures:
+        try:
+            d = datetime.strptime(day["date"], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        if d >= today:
+            upcoming.append((d, day["matches"]))
+    if not upcoming:
+        return ""
+
+    def match_lines(matches):
+        # List order IS play order: Match 1 at times[0], Match 2 at times[1].
+        out = []
+        for i, (a, b) in enumerate(matches):
+            t = times[i] if i < len(times) else "time not fixed"
+            mine = "  <- THIS PERSON'S TEAM" if team and team in (a, b) else ""
+            out.append(f"  Match {i + 1} ({t}): {a} vs {b}{mine}")
+        return out
+
+    d, matches = upcoming[0]
+    days_away = (d - today).days
+    when = "TODAY" if days_away == 0 else ("TOMORROW" if days_away == 1 else f"in {days_away} days")
+    lines = [
+        "################  NEXT RPL CRICKET MATCH  ################",
+        f"Next match day: {d.strftime('%d-%b-%Y (%A)')} ({when}) at "
+        f"{data.get('venue', 'Urban Farms')}. League matches are "
+        f"{data.get('overs', 14)} overs each.",
+        "Fixtures that day, in playing order — use these EXACT pairings, times "
+        "and order, never invent or reorder them:",
+        *match_lines(matches),
+    ]
+    if len(upcoming) > 1:
+        lines.append("Rest of the league season (same venue, same match times):")
+        for d2, m2 in upcoming[1:]:
+            lines.append(f" {d2.strftime('%d-%b-%Y (%A)')}:")
+            lines.extend(match_lines(m2))
+    # Per-team list, ready to copy: split into "next day" + "rest", the model
+    # built a team schedule from the rest only and dropped the 01-Oct match.
+    lines.append("Each team's remaining matches — for \"my team's schedule\" copy the "
+                 "WHOLE line, including the next match day above:")
+    teams = sorted({t for _, ms in upcoming for m in ms for t in m})
+    for tm in teams:
+        games = [f"{d2.strftime('%d-%b')} {times[i] if i < len(times) else 'time not fixed'} "
+                 f"vs {b if a == tm else a}"
+                 for d2, ms in upcoming for i, (a, b) in enumerate(ms) if tm in (a, b)]
+        mine = "  <- THIS PERSON'S TEAM" if tm == team else ""
+        lines.append(f"  {tm} ({len(games)}): " + "; ".join(games) + mine)
+    if _RPL_RULES:
+        lines.append("RPL CRICKET PLAYING RULES — for \"what are the rules\" give 'Every match' "
+                     "plus the section for their match type. Anything not listed here (wides, "
+                     "no-balls, ties, etc.) follows standard ICC rules — say so and explain the "
+                     "ICC rule. Where a rule below differs from ICC (e.g. no leg byes), the RPL "
+                     "rule wins:")
+        lines.append(_RPL_RULES.strip())
+    lines.append("If you mention fixtures at all, take them from this block only. "
+                 "\"First or second match\" means Match 1 or Match 2 above. If a "
+                 "pairing is not listed here, say you do not have it rather than guessing.")
+    lines.append("################  END OF RPL FIXTURES  ################\n\n")
+    return "\n".join(lines)
+
+
+def rpl_squads_block(team: str | None = None) -> str:
+    """Every team's squad from the roster doc, or "" if the doc is missing.
+
+    Parsed from "## <team>" / "Owner: .. | Captain: .." / comma-separated
+    names, so HR editing that doc still changes what Buddy says.
+    """
+    teams = set((_rpl_load().get("captains") or {}).keys())
+    found = [m for m in re.finditer(r"^## (.+?)\s*\n(Owner:.*)\n(.+)$", _RPL_ROSTER, flags=re.M)
+             if m.group(1).strip() in teams]
+    if not found:
+        return ""
+    lines = [
+        "################  RPL TEAM SQUADS  ################",
+        "Official squads — the same squad plays every RPL sport. For \"who is in my "
+        "team/squad\" or one named team, give that team's FULL list exactly as below. "
+        "With no team named, ask which team rather than listing all of them.",
+    ]
+    for m in found:
+        name = m.group(1).strip()
+        mine = "  <- THIS PERSON'S TEAM" if name == team else ""
+        lines.append(f"{name} — {m.group(2).strip()}{mine}")
+        lines.append(f"  {m.group(3).strip()}")
+    lines.append("################  END OF RPL TEAM SQUADS  ################\n\n")
+    return "\n".join(lines)
+
+
+def _record_failed_turn(phone: str, incoming_message: str, apology: str, error: str):
+    """Write a turn to the transcript even though answering it failed.
+
+    Without this the whole turn vanishes: the reply still goes out, but the
+    webhook's except path returned before save_user_data, so the question and
+    the apology never reached the database and never showed in the WhatsApp
+    tab. The failures are exactly the turns worth reviewing, so they are the
+    worst ones to lose. Re-reads from the database rather than trusting the
+    in-memory copy, which may be mid-update."""
+    if not phone:
+        return
+    try:
+        session_key = _session_key_for_phone(phone)
+        user_data = get_user_data(session_key)
+        hist = user_data.setdefault("history", [])
+        # The main path may already have appended the question in memory, but
+        # that copy was never saved — guard only against a genuine re-entry.
+        if not (hist and hist[-1].get("role") == "user"
+                and hist[-1].get("content") == incoming_message):
+            if incoming_message:
+                hist.append({"role": "user", "content": incoming_message})
+        hist.append({"role": "assistant", "content": apology})
+        touch_last_message(user_data)
+        save_user_data(session_key, user_data)
+        upload_manager.log_question(session_key, "whatsapp", incoming_message or "", True, None)
+        logger.info(f"📝 [WEBHOOK] Recorded failed turn for {phone} ({error[:120]})")
+    except Exception as e:
+        logger.error(f"Could not record failed turn for {phone}: {e}")
+
+
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
     phone = None
@@ -1989,7 +2299,11 @@ async def whatsapp_webhook(request: Request):
         # plain split() on the full name mishandles anything beyond a clean
         # "First Last" (middle names, or a name where the surname is listed
         # first). Falls back to splitting only when there's no such column.
-        first_name = EMPLOYEE_DIRECTORY.first_name_of(phone) or (full_name.split()[0] if full_name else None)
+        # No split() fallback: "B Reddy Varalakshmi" would become "B" and
+        # "Yekollu Siddartha Reddy" would become "Yekollu". When the roster's
+        # First Name column can't be trusted, use the full name rather than
+        # guessing at which token is the given name.
+        first_name = EMPLOYEE_DIRECTORY.first_name_of(phone) or full_name
 
         segment, should_ask_segment = resolve_segment(candidate, user_data, incoming_message, phone=phone)
 
@@ -2004,8 +2318,13 @@ async def whatsapp_webhook(request: Request):
         first_message_greeting = not user_data["history"] and not media and _is_plain_greeting(incoming_message)
         empty_ping = not incoming_message and not media
         if (empty_ping and not user_data["history"]) or first_message_greeting:
+            # Use the roster's first name when the number matches an employee.
+            # first_name is resolved above; these canned greetings used to
+            # ignore it, so a known colleague got an anonymous "Hey there!"
+            # while every LLM-generated reply greeted them by name.
+            hello = f"Hi {first_name}! 👋" if first_name else "Hey there! 👋"
             reply = (
-                "Hey there! 👋 I'm Recykal Buddy.\n"
+                f"{hello} I'm Recykal Buddy.\n"
                 "Have a question? I've got you! 😊 What can I help you with?"
             ) + FIRST_MESSAGE_DISCLAIMER
             if should_ask_segment:
@@ -2022,7 +2341,11 @@ async def whatsapp_webhook(request: Request):
             # ongoing conversation back to onboarding language mid-chat.
             # Scoped the same way the plain-greeting shortcut already is —
             # only genuinely brand-new sessions get the full welcome.
-            return whatsapp_reply(phone, "Hey! 😊 What can I help you with?")
+            return whatsapp_reply(
+                phone,
+                f"Hey {first_name}! 😊 What can I help you with?" if first_name
+                else "Hey! 😊 What can I help you with?",
+            )
 
         # opportunistic email capture
         if incoming_message and not user_data.get("email"):
@@ -2056,18 +2379,47 @@ async def whatsapp_webhook(request: Request):
         # actual Function without asking "which function are you from?".
         # None (not in roster / no Function column) must stay None here, so
         # the model treats it as genuinely unknown rather than inventing one.
+        # The person's NAME and Function, both from the employee roster. The
+        # name was previously computed but never reached the model, so replies
+        # only used it when it happened to appear in the conversation history —
+        # which is why a known colleague sometimes got a bare "Hey!".
         employee_function = EMPLOYEE_DIRECTORY.function_of(phone)
-        if employee_function:
-            kb_context = (
-                f"################  AUTHENTICATED EMPLOYEE PROFILE  ################\n"
-                f"This person's Function (from the employee roster, not something they typed) "
-                f"is: {employee_function}. Use this to resolve a \"who is my BP/HRBP\" or "
-                f"function-specific question WITHOUT asking them which function they're in — "
-                f"only ask if this Function value doesn't clearly map to anything in the "
-                f"KNOWLEDGE BASE's BP-by-vertical mapping.\n"
-                f"################  END OF EMPLOYEE PROFILE  ################\n\n"
-                + kb_context
-            )
+        team_info = rpl_team_of(full_name or "")
+        if employee_function or first_name:
+            lines = [
+                "################  AUTHENTICATED EMPLOYEE PROFILE  ################",
+            ]
+            if first_name:
+                lines.append(
+                    f"This person's name is {full_name or first_name} and they go by "
+                    f"{first_name} (from the employee roster, not something they typed). "
+                    f"Greet them by their first name and use it naturally — never open "
+                    f"with a nameless \"Hey!\" or \"Hi there!\" when you have their name."
+                )
+            if team_info:
+                team, captain, owner = team_info
+                lines.append(
+                    f"This person's RPL team is {team} (captain {captain}, owner "
+                    f"{owner}). Answer \"which team am I in\", \"who is my captain\" "
+                    f"and jersey questions from this directly — never say you cannot "
+                    f"find them in the rosters."
+                )
+            if employee_function:
+                lines.append(
+                    f"This person's Function (from the employee roster, not something they "
+                    f"typed) is: {employee_function}. Use this to resolve a \"who is my "
+                    f"BP/HRBP\" or function-specific question WITHOUT asking them which "
+                    f"function they're in — only ask if this Function value doesn't clearly "
+                    f"map to anything in the KNOWLEDGE BASE's BP-by-vertical mapping."
+                )
+            lines.append("################  END OF EMPLOYEE PROFILE  ################\n\n")
+            kb_context = "\n".join(lines) + kb_context
+
+        # Always give the real fixtures, so the nudge never has to guess them.
+        _team = team_info[0] if team_info else None
+        _match_block = rpl_next_match_block(_team) + rpl_results_block() + rpl_squads_block(_team)
+        if _match_block:
+            kb_context = _match_block + kb_context
         # Run off the event loop thread: generate_reply's DeepSeek/Claude-API
         # paths already block on network I/O, and claude_code_cli blocks on
         # a slow subprocess (~15-20s) — without to_thread, that one call
@@ -2114,8 +2466,11 @@ async def whatsapp_webhook(request: Request):
         )
 
     except Exception as e:
-        logger.error(f"ERROR in webhook: {e}")
+        logger.error(f"ERROR in webhook for {phone}: {e}", exc_info=True)
         apology = "Sorry, something hiccuped on my end. Mind sending that again?"
+        # Log it before replying — everything in and out must be recorded,
+        # whether or not the model answered.
+        _record_failed_turn(phone, locals().get("incoming_message", ""), apology, str(e))
         if WHATSAPP_PROVIDER == "meta":
             if phone:
                 try:
@@ -2167,6 +2522,11 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
 
         blended = f"{recent_user_context(user_data['history'])} {message}".strip()
         kb_context = retrieve_context(message, segment, extra_query=blended)
+        # Same injected fixtures as WhatsApp: retrieval alone misses the table
+        # and the bot then claims it has no pairings.
+        _match_block = rpl_next_match_block() + rpl_results_block() + rpl_squads_block()
+        if _match_block:
+            kb_context = _match_block + kb_context
 
         user_data["history"].append({"role": "user", "content": message})
         reply, unanswered, _is_meta = await asyncio.to_thread(
@@ -2220,7 +2580,10 @@ def rebuild_and_reload_knowledge():
     HR-uploaded documents, filtered by audience tag, then reload them into
     their vector stores. knowledge.md (segment unknown) only gets 'both'-tagged
     docs; the pre/post-join files get their tag plus every 'both'-tagged doc."""
+    global _RPL_RULES, _RPL_ROSTER
     all_active = upload_manager.list_knowledge_documents(active_only=True)
+    _RPL_RULES = next((d['content'] for d in all_active if d['title'] == RPL_RULES_TITLE), "")
+    _RPL_ROSTER = next((d['content'] for d in all_active if d['title'] == RPL_ROSTER_TITLE), "")
     common_docs = [d for d in all_active if d.get('audience', 'both') == 'both']
     pre_join_docs = [d for d in all_active if d.get('audience') in ('pre_join', 'both')]
     post_join_docs = [d for d in all_active if d.get('audience') in ('post_join', 'both')]
@@ -2494,6 +2857,59 @@ async def list_knowledge_documents(current_user: dict = Depends(require_admin)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.get("/knowledge/documents/{doc_id}/download")
+async def download_knowledge_document(doc_id: int, current_user: dict = Depends(require_admin)):
+    """The document's full text as a file, so HR can read what the bot was given"""
+    doc = next((d for d in upload_manager.list_knowledge_documents() if d['id'] == doc_id), None)
+    if not doc:
+        return JSONResponse({"error": "Document not found"}, status_code=404)
+    name = re.sub(r'[^\w.-]+', '_', doc['title']).strip('_') or f"document_{doc_id}"
+    if not name.lower().endswith(('.md', '.txt')):
+        name += '.md'
+    return Response(content=doc['content'], media_type="text/markdown",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@app.get("/rpl/results")
+async def list_rpl_results(current_user: dict = Depends(require_admin)):
+    return JSONResponse({"results": [dict(r, summary=cricheroes.summary_text(r)) for r in _rpl_results()]})
+
+
+@app.post("/rpl/results")
+async def save_rpl_result(request: Request, current_user: dict = Depends(require_admin)):
+    """Save one finished match: {"url": CricHeroes scorecard link} or {"text": typed result}.
+    Saving the same CricHeroes match again replaces it (for corrections)."""
+    data = await request.json()
+    url, text = (data.get("url") or "").strip(), (data.get("text") or "").strip()
+    try:
+        if url:
+            entry = await asyncio.to_thread(cricheroes.fetch, url)
+            key = f"cricheroes-{entry['match_id']}"
+        elif text:
+            entry, key = {"text": text}, f"manual-{int(time.time())}"
+        else:
+            return JSONResponse({"error": "Paste a CricHeroes link or type the result"}, status_code=400)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"CricHeroes fetch failed for {url}: {e}")
+        return JSONResponse({"error": f"Could not read CricHeroes: {e}. Type the result instead."}, status_code=502)
+    entry.update(key=key, saved_by=current_user["username"], saved_at=datetime.now(IST).isoformat(timespec="seconds"))
+    _save_rpl_results([r for r in _rpl_results() if r.get("key") != key] + [entry])
+    logger.info(f"RPL result {key} saved by {current_user['username']}")
+    return JSONResponse({"success": True, "result": dict(entry, summary=cricheroes.summary_text(entry))})
+
+
+@app.delete("/rpl/results/{key}")
+async def delete_rpl_result(key: str, current_user: dict = Depends(require_admin)):
+    results = _rpl_results()
+    if not any(r.get("key") == key for r in results):
+        return JSONResponse({"error": "Result not found"}, status_code=404)
+    _save_rpl_results([r for r in results if r.get("key") != key])
+    logger.info(f"RPL result {key} deleted by {current_user['username']}")
+    return JSONResponse({"success": True})
+
+
 @app.post("/knowledge/documents/{doc_id}/toggle")
 async def toggle_knowledge_document(doc_id: int, active: bool = Form(...), current_user: dict = Depends(require_admin)):
     """Activate or deactivate a knowledge document without deleting it"""
@@ -2542,12 +2958,15 @@ async def delete_knowledge_document(doc_id: int, current_user: dict = Depends(re
 
 @app.get("/candidates")
 async def list_candidates(current_user: dict = Depends(require_admin)):
-    """List candidates from the onboarding log (if one is configured), each
-    flagged with whether they've ever messaged the bot — a rough signal for
-    whether a free-form update would actually be deliverable (WhatsApp only
-    allows free-form sends within 24h of the recipient's last message)."""
+    """People you can send outreach to, taken from the employee roster —
+    the same sheet the WhatsApp tab resolves names from, so a person picked
+    here is the same person that tab shows.
+
+    Each row is flagged with whether they've ever messaged the bot, which is
+    a rough proxy for whether a free-form send will actually be delivered
+    (WhatsApp only allows free-form within 24h of their last message)."""
     try:
-        if not DIRECTORY.ready:
+        if not EMPLOYEE_DIRECTORY.ready:
             return JSONResponse({
                 "success": True,
                 "configured": False,
@@ -2558,25 +2977,62 @@ async def list_candidates(current_user: dict = Depends(require_admin)):
         messaged_phones = {normalize_phone(k) for k in upload_manager.all_messaged_session_keys()}
 
         candidates = []
-        for entry in DIRECTORY.list_all():
-            row = entry["row"]
+        for emp in EMPLOYEE_DIRECTORY.list_all():
             candidates.append({
-                "phone_normalized": entry["phone_normalized"],
-                "phone_raw": entry["phone_raw"],
-                "name": DIRECTORY.name_of(row),
-                "segment": DIRECTORY.segment_of(row),
-                "has_messaged": entry["phone_normalized"] in messaged_phones,
+                "phone_normalized": emp["phone_normalized"],
+                "phone_raw": emp["phone_raw"] or emp["phone_normalized"],
+                "name": emp["name"],
+                "segment": emp["function"],
+                "emp_id": emp["emp_id"],
+                "has_messaged": emp["phone_normalized"] in messaged_phones,
             })
 
         return JSONResponse({
             "success": True,
             "configured": True,
+            "source": "employee roster",
             "welcome_template_configured": _welcome_template_configured(),
             "candidates": candidates,
         })
     except Exception as e:
         logger.error(f"List candidates error: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+def _session_key_for_phone(phone: str) -> str:
+    """The session key an existing WhatsApp conversation already uses for this
+    person, or the number as given if there isn't one yet.
+
+    Session keys are whatever the inbound webhook saw, which is the full
+    international form ("+917799777648"). The roster stores bare 10-digit
+    numbers ("7799777648"). Keying outbound messages off the roster form
+    silently created a SECOND thread per person, so the admin saw a one-line
+    conversation next to the real 240-message one. Match on the last 10
+    digits and reuse whatever key the conversation already has."""
+    target = normalize_phone(phone)
+    if target:
+        for key in upload_manager.all_messaged_session_keys():
+            if key and not key.startswith("web-") and normalize_phone(key) == target:
+                return key
+    return phone
+
+
+def _record_outbound(phone: str, text: str):
+    """Write a delivered outreach message into that person's WhatsApp thread,
+    so the admin's view of the conversation matches what the recipient sees.
+
+    Only called after WhatsApp accepted the send — a message that failed was
+    never seen by anyone, and showing it would make the thread a lie."""
+    try:
+        session_key = _session_key_for_phone(phone)
+        user_data = get_user_data(session_key)
+        user_data["history"].append({"role": "assistant", "content": text})
+        touch_last_message(user_data)
+        save_user_data(session_key, user_data)
+    except Exception as e:
+        # Losing the transcript line must not turn a delivered message into
+        # an error response.
+        logger.error(f"Could not record outbound message to {phone}: {e}")
 
 
 @app.post("/candidates/send-welcome")
@@ -2597,6 +3053,8 @@ async def send_welcome_messages(request: Request, current_user: dict = Depends(r
             name = DIRECTORY.name_of(candidate) if candidate else None
             first_name = name.split()[0] if name else "there"
             ok, detail = send_whatsapp_template(phone, {"1": first_name})
+            if ok:
+                _record_outbound(phone, f"[welcome template sent to {first_name}]")
             results.append({"phone": phone, "success": ok, "detail": detail})
             logger.info(f"Welcome send to {phone} by {current_user['username']}: {ok} ({detail})")
 
@@ -2621,6 +3079,8 @@ async def send_update_messages(request: Request, current_user: dict = Depends(re
         results = []
         for phone in phones:
             ok, detail = send_whatsapp_freeform(phone, message)
+            if ok:
+                _record_outbound(phone, message)
             results.append({"phone": phone, "success": ok, "detail": detail})
             logger.info(f"Update send to {phone} by {current_user['username']}: {ok} ({detail})")
 
