@@ -2028,6 +2028,41 @@ def _save_rpl_results(results: list) -> None:
     _RPL_RESULTS = results
 
 
+_RPL_POINTS = {"text": "", "at": None, "tried": 0.0}
+RPL_POINTS_TTL = 600  # seconds; CricHeroes updates the table as matches finish
+
+
+def rpl_points_block() -> str:
+    """Cricket points table read live from CricHeroes, cached for 10 minutes.
+
+    Blocking (network), so callers run it in a thread. A failed fetch keeps
+    the last good table, labelled with when it was read; with none, "".
+    """
+    tid = _rpl_load().get("cricheroes_tournament_id")
+    if not tid:
+        return ""
+    now = time.time()
+    if now - _RPL_POINTS["tried"] > RPL_POINTS_TTL:
+        _RPL_POINTS["tried"] = now
+        try:
+            _RPL_POINTS["text"] = cricheroes.points_text(cricheroes.fetch_points_table(tid))
+            _RPL_POINTS["at"] = datetime.now(IST)
+        except Exception as e:
+            logger.warning(f"RPL points table fetch failed (keeping last good copy): {e}")
+    if not _RPL_POINTS["text"]:
+        return ""
+    return "\n".join([
+        "################  RPL CRICKET POINTS TABLE (live from CricHeroes)  ################",
+        f"As of {_RPL_POINTS['at'].strftime('%d-%b %I:%M %p')} IST. Win = 2 points; ties on "
+        "points are split by NRR (net run rate). This is the CRICKET league table only — "
+        "not the RPL overall leaderboard (badminton + volleyball). It supersedes any "
+        "knowledge-base note saying no cricket matches have been played. Top 3 go to the "
+        "playoffs: 2nd vs 3rd in the 19-Nov Eliminator, 1st vs the winner in the 26-Nov Final.",
+        _RPL_POINTS["text"],
+        "################  END OF RPL CRICKET POINTS TABLE  ################\n\n",
+    ])
+
+
 def rpl_results_block() -> str:
     results = _rpl_results()
     if not results:
@@ -2183,6 +2218,53 @@ def rpl_squads_block(team: str | None = None) -> str:
         lines.append(f"{name} — {m.group(2).strip()}{mine}")
         lines.append(f"  {m.group(3).strip()}")
     lines.append("################  END OF RPL TEAM SQUADS  ################\n\n")
+    return "\n".join(lines)
+
+
+_NAME_LOOKUP_SKIP = set("""
+which what who whom whose where when how many much about the and for with from this that there
+their they them have has had are was were is in on of to a an it its can could would should will
+you your our his her him she he me my mine we us team teams squad squads player players rpl
+name names check find contact number details detail need tell give show list all any any one
+clan champions samurais force fighters tribe titans gang gladiators match matches today play
+playing plays cricket also again still more yes not now please thanks thank hey hello hi
+""".split())
+
+
+def rpl_name_lookup_block(text: str) -> str:
+    """Team of every employee whose name shares a word with the message.
+
+    The 23-player squads are injected every turn, but the full employee to
+    team map (450+ names) is too big for that, so "which team is Atharva
+    Patil in?" got "not in any roster" on 2026-10-01 though the map had him.
+    Look the asked-about names up here instead and inject only the hits.
+    """
+    members = _rpl_load().get("members") or {}
+    words = {w for w in re.findall(r"[a-z]+", (text or "").lower())
+             if len(w) >= 3 and w not in _NAME_LOOKUP_SKIP}
+    if not words or not members:
+        return ""
+    hits = []
+    for name, team in members.items():
+        if name == "Meet Your Team":  # slide heading that slipped into the map
+            continue
+        shared = len(words & set(re.findall(r"[a-z]+", name.lower())))
+        if shared:
+            hits.append((-shared, name, team))
+    if not hits:
+        return ""
+    hits.sort()
+    cap = 20
+    lines = ["################  RPL TEAM LOOKUP (names in this message)  ################",
+             "Every employee is on one of the 5 RPL teams (450+ people). These are the "
+             "employees whose names match words in the message, with their team — answer "
+             "\"which team is X\" and \"how many X\" from this list. Being on a team is not "
+             "the same as being in its 23-player playing squad (the TEAM SQUADS block); say "
+             "which applies. If several people match, list them all rather than picking one:"]
+    lines += [f"  {name} — {team}" for _, name, team in hits[:cap]]
+    if len(hits) > cap:
+        lines.append(f"  … and {len(hits) - cap} more matches; ask for the full name to narrow it down.")
+    lines.append("################  END OF RPL TEAM LOOKUP  ################\n\n")
     return "\n".join(lines)
 
 
@@ -2426,7 +2508,9 @@ async def whatsapp_webhook(request: Request):
 
         # Always give the real fixtures, so the nudge never has to guess them.
         _team = team_info[0] if team_info else None
-        _match_block = rpl_next_match_block(_team) + rpl_results_block() + rpl_squads_block(_team)
+        _match_block = (rpl_next_match_block(_team) + rpl_results_block()
+                        + await asyncio.to_thread(rpl_points_block)
+                        + rpl_squads_block(_team) + rpl_name_lookup_block(incoming_message))
         if _match_block:
             kb_context = _match_block + kb_context
         # Run off the event loop thread: generate_reply's DeepSeek/Claude-API
@@ -2533,7 +2617,9 @@ async def chat(request: Request, current_user: dict = Depends(get_current_user))
         kb_context = retrieve_context(message, segment, extra_query=blended)
         # Same injected fixtures as WhatsApp: retrieval alone misses the table
         # and the bot then claims it has no pairings.
-        _match_block = rpl_next_match_block() + rpl_results_block() + rpl_squads_block()
+        _match_block = (rpl_next_match_block() + rpl_results_block()
+                        + await asyncio.to_thread(rpl_points_block)
+                        + rpl_squads_block() + rpl_name_lookup_block(message))
         if _match_block:
             kb_context = _match_block + kb_context
 
