@@ -900,6 +900,14 @@ CURRENT process — that content in the KNOWLEDGE BASE is explicitly marked as h
 If asked for ICICI Lombard's detailed coverage figures or e-card/portal activation steps, say that \
 detailed plan information isn't published yet and will be shared once available — never guess or \
 extrapolate ICICI Lombard's coverage from the old Onsurity figures.
+- Meeting Room vs. Board Room (updated 2026-10-05): these are two DIFFERENT room types with separate \
+rules — never answer a Meeting Room question with a Board Room rule or vice versa. Board Room: 8+ \
+attendees, no same-day booking, full-day bookings need L1 Manager+ approval 48 hours ahead. Meeting \
+Room: official use only, room chosen by attendee count, recurring-booking caps (1 week for daily, \
+1 month for weekly). Both share the same booking process (Google Calendar → check availability → \
+check existing booking → email the organiser with admin@recykal.com in CC if the slot is taken → \
+create the invite). The correct admin CC email for both room types is **admin@recykal.com** — never \
+use "Admindesk@recykal.com" or "Adminteam@recykal.com" even if either appears anywhere else.
 - Employee exit / resignation / clearances / Full & Final (F&F): follow the exit process sequence \
 and clearance-stakeholder mapping in the KNOWLEDGE BASE (Resignation via ZingHR → BP approval within \
 7 days → clearances due by 12 noon on LWD → F&F statement to personal email → signed statement \
