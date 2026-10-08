@@ -891,15 +891,17 @@ September 2026 is a two-period proration (1-16 Sep at the old ₹15,000 ceiling,
 old-vs-new amount, or which CTC component absorbs the change — the KNOWLEDGE BASE's contribution table \
 is illustrative only, by wage band, not a tool for computing anyone's real numbers. Always direct \
 individual salary-structure questions to the employee's BP or peopleandculture@recykal.com.
-- GMC/health insurance provider (effective 1-Oct-2026): Recykal's Group Medical Cover insurer is \
-ICICI Lombard, not Onsurity — Onsurity is the PREVIOUS insurer and is now superseded. If asked who \
-the current insurer is, or for insurance claim help during the transition, use the interim claim \
-support contacts and escalation order in the KNOWLEDGE BASE. Do NOT quote Onsurity-specific plan \
-figures, activation steps, app instructions, or email addresses (onsurity.com/onsurity.tech) as the \
-CURRENT process — that content in the KNOWLEDGE BASE is explicitly marked as historical/superseded. \
-If asked for ICICI Lombard's detailed coverage figures or e-card/portal activation steps, say that \
-detailed plan information isn't published yet and will be shared once available — never guess or \
-extrapolate ICICI Lombard's coverage from the old Onsurity figures.
+- Group insurance (renewed effective 1-Oct-2026): health (GMC) and personal accident (GPA) are with \
+ICICI Lombard General Insurance, term life (GTL) is with Bajaj Life Insurance, and Anand Rathi \
+Insurance Brokers (ARIBL) is the support partner. Onsurity is the PREVIOUS insurer and is superseded — \
+never quote Onsurity-specific plan figures, activation steps, app instructions or onsurity.com/\
+onsurity.tech emails as current, even if they still appear in an older deck or slide. Answer coverage, \
+sum insured, claim process, claim documents, exclusions and the claims escalation contacts strictly \
+from the 2026-27 group insurance document in the KNOWLEDGE BASE. The ARIBL claims SPOC/escalation \
+names, numbers and emails in that document are external broker contacts and may be shared as written \
+(the one exception to the no-phone-number rule). E-card and insurance-orientation dates are \
+tentative — say so. If a detail is not in that document (a specific hospital, a particular treatment's \
+coverage, a premium), don't guess — point to the ARIBL SPOC or peopleandculture@recykal.com.
 - Meeting Room vs. Board Room (updated 2026-10-05): these are two DIFFERENT room types with separate \
 rules — never answer a Meeting Room question with a Board Room rule or vice versa. Board Room: 8+ \
 attendees, no same-day booking, full-day bookings need L1 Manager+ approval 48 hours ahead. Meeting \
@@ -2458,16 +2460,22 @@ async def whatsapp_webhook(request: Request):
             user_data.setdefault("documents", []).extend(saved)
             types = ", ".join(sorted({(s["content_type"] or "file").split("/")[0] for s in saved}))
             caption = incoming_message or ""
-            user_turn = (
-                (caption + "\n\n" if caption else "")
-                + f"[The new hire just uploaded {len(saved)} document(s) "
-                f"({types}) through WhatsApp. Warmly confirm you've received the "
-                f"document(s) and that the People & Culture team will review them. "
-                f"Do NOT greet from scratch or ask them to re-send. If appropriate, "
-                f"mention any remaining onboarding steps from the knowledge base.]"
-            )
+            # History keeps only what the person sent, so the admin chat view
+            # shows "📎 Sent 1 image" (plus the file) instead of our prompt.
+            kind = types if len({t.strip() for t in types.split(",")}) == 1 and types != "application" else "file"
+            user_turn = (caption + "\n" if caption else "") + f"📎 Sent {len(saved)} {kind}{'s' if len(saved) > 1 else ''}"
             retrieval_message = f"{caption} document upload onboarding verification".strip()
-            kb_context = retrieve_context(retrieval_message, segment)
+            kb_context = (
+                "################  FILE RECEIVED  ################\n"
+                f"The person just sent {len(saved)} file(s) ({types}) on WhatsApp. It is saved, and "
+                "the People & Culture team can see it in Buddy's admin page. You CANNOT see what "
+                "is in it. If it looks like an onboarding document (no question, or they say it is "
+                "one), confirm it is saved and that People & Culture can see it — do not promise a "
+                "review, a timeline, or that you will flag it. If their message asks about what the "
+                "picture shows, say you can't view images and ask them to describe it in words. "
+                "Do NOT greet from scratch or ask them to re-send.\n"
+                "################  END OF FILE RECEIVED  ################\n\n"
+            ) + retrieve_context(retrieval_message, segment)
         else:
             user_turn = incoming_message
             blended = f"{recent_user_context(user_data['history'])} {incoming_message}".strip()
@@ -3527,6 +3535,44 @@ async def export_whatsapp_chats(current_user: dict = Depends(require_admin)):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+_UPLOAD_NAME = re.compile(r"^(\d+)_\d+(\.[A-Za-z0-9]+)?$")
+
+
+def _uploaded_files(phone: str) -> list:
+    """Files this person sent on WhatsApp, from disk. save_media_* names them
+    "<unix time>_<n>.<ext>", which is how the chat view pins each one to the
+    message it came with."""
+    folder = UPLOAD_MEDIA_DIR / re.sub(r"[^0-9]", "", phone)
+    if not folder.is_dir():
+        return []
+    out = []
+    for f in sorted(folder.iterdir()):
+        m = _UPLOAD_NAME.match(f.name)
+        if m and f.is_file():
+            out.append({"name": f.name, "received_at": int(m.group(1)), "size": f.stat().st_size,
+                        "content_type": mimetypes.guess_type(f.name)[0] or "application/octet-stream"})
+    return out
+
+
+@app.get("/whatsapp/{phone}/files/{name}")
+async def get_whatsapp_file(phone: str, name: str, current_user: dict = Depends(require_admin)):
+    """Admin-only: one file a WhatsApp user sent. Name must be one we wrote."""
+    if not _UPLOAD_NAME.match(name):
+        return JSONResponse({"error": "Invalid file name"}, status_code=400)
+    path = UPLOAD_MEDIA_DIR / re.sub(r"[^0-9]", "", phone) / name
+    if not path.is_file():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    # Sent by anyone on WhatsApp, so treat as hostile: only raster images may
+    # display; anything else (SVG, HTML, PDF...) is forced to download, and the
+    # sandbox CSP stops a browser running script in it if opened anyway.
+    ctype = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    inline = ctype in ("image/png", "image/jpeg", "image/gif", "image/webp")
+    return FileResponse(path, media_type=ctype if inline else "application/octet-stream", filename=name,
+                        content_disposition_type="inline" if inline else "attachment",
+                        headers={"Content-Security-Policy": "sandbox; default-src 'none'",
+                                 "X-Content-Type-Options": "nosniff"})
+
+
 @app.get("/whatsapp/{phone}/chat")
 async def get_whatsapp_chat_transcript(phone: str, current_user: dict = Depends(require_admin)):
     """Admin-only: read a WhatsApp user's conversation history — same
@@ -3546,6 +3592,7 @@ async def get_whatsapp_chat_transcript(phone: str, current_user: dict = Depends(
             "history": data.get("history", []),
             "questions": questions,
             "feedback": upload_manager.get_feedback_for_session(normalized),
+            "files": _uploaded_files(normalized),
         })
     except Exception as e:
         logger.error(f"Get WhatsApp chat transcript error: {e}")
